@@ -2,8 +2,12 @@ import os
 import time
 from PySide2 import QtCore, QtGui, QtWidgets
 
-
 NAME = 'Shoppy'
+import logging
+LOG_LEVEL = logging.DEBUG
+log = logging.getLogger(NAME)
+log.setLevel(LOG_LEVEL)
+
 DIM_OPACITY = 150
 DIM_DURATION = 200
 DIM_INTERVAL = 20
@@ -33,7 +37,9 @@ class Shoppy(QtWidgets.QGraphicsView):
             QtWidgets.QShortcut(QtGui.QKeySequence(seq), self, self.save_shot)
 
         self.toolbox = None
-        QtCore.QTimer(self).singleShot(500, self._build_toolbox)
+        QtCore.QTimer(self).singleShot(300, self._build_toolbox)
+        self.settings = Settings()
+        self.settings.loaded.connect(self._drag_last_tangle)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.buttons() & QtCore.Qt.LeftButton:
@@ -133,12 +139,29 @@ class Shoppy(QtWidgets.QGraphicsView):
             return
 
         file_path, file_type = QtWidgets.QFileDialog.getSaveFileName(
-            self, NAME + ' Save Screenshot', PATH, 'PNG (*.png)')
+            self, NAME + ' Save Screenshot', self.settings.last_save_path or PATH, 'PNG (*.png)'
+        )
         if not file_path:
             return
 
         cutout = self.original_pixmap.copy(self._dragtangle)
         cutout.save(file_path)
+        self.settings.last_save_path = os.path.dirname(file_path)
+
+        rect_list = list(self._dragtangle.getRect())
+        if rect_list in self.settings.last_rectangles:
+            if self.settings.last_rectangles[-1] == rect_list:
+                return
+            self.settings.last_rectangles.remove(rect_list)
+        self.settings.last_rectangles.append(rect_list)
+        if len(self.settings.last_rectangles) > self.settings.max_rectangles:
+            del self.settings.last_rectangles[self.settings.max_rectangles :]
+        self.settings._save()
+
+    def _drag_last_tangle(self):
+        if self.settings.last_rectangles:
+            self._dragtangle.setRect(*self.settings.last_rectangles[-1])
+            self.dimmer.cutout(self._dragtangle)
 
 
 class Dimmer(QtCore.QObject):
@@ -233,6 +256,59 @@ class ToolBox(QtWidgets.QWidget):
     def x(self):
         self.close_requested.emit()
         self.hide()
+
+
+class Settings(QtCore.QObject):
+    loaded = QtCore.Signal()
+
+    def __init__(self):
+        super(Settings, self).__init__()
+        self.last_save_path = ''
+        self.last_rectangles = []
+        self.max_rectangles = 12
+
+        self._settings_file = NAME.lower() + '.json'
+        self._settings_path = os.path.join(PATH, self._settings_file)
+        QtCore.QTimer(self).singleShot(500, self._load)
+
+    def _load(self):
+        for key, value in self._get_json().items():
+            if key not in self.__dict__:
+                log.warning(f'Key {key} not yet listed in Settings obj!1')
+            self.__dict__[key] = value
+        self.loaded.emit()
+
+    def _get_json(self):
+        import json
+
+        if os.path.isfile(self._settings_path):
+            with open(self._settings_path) as file_obj:
+                return json.load(file_obj)
+        return {}
+
+    def _save(self):
+        import json
+
+        current = self._get_json()
+        do_write = False
+        for name, value in self.__dict__.items():
+            if name.startswith('_'):
+                continue
+            if not isinstance(value, (str, int, list)):
+                continue
+            if name not in current:
+                do_write = True
+                current[name] = value
+            if current[name] == value:
+                continue
+            do_write = True
+            current[name] = value
+
+        if not do_write:
+            return
+
+        with open(self._settings_path, 'w') as file_obj:
+            json.dump(current, file_obj, indent=2, sort_keys=True)
 
 
 if __name__ == '__main__':
