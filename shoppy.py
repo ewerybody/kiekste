@@ -47,6 +47,8 @@ class Shoppy(QtWidgets.QGraphicsView):
         QtCore.QTimer(self).singleShot(400, self._build_toolbox)
         self.settings = Settings()
         self.settings.loaded.connect(self._drag_last_tangle)
+        self._ffmpeg = ''
+        QtCore.QTimer(self).singleShot(400, self._find_ffmpeg)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.buttons() & QtCore.Qt.LeftButton:
@@ -137,6 +139,7 @@ class Shoppy(QtWidgets.QGraphicsView):
         self.toolbox.save.connect(self.save_shot)
         self.toolbox.clip.connect(self.clip)
         self.toolbox.coords_changed.connect(self._on_toolbox_coords_change)
+        self.toolbox.mode_switched.connect(self._change_mode)
         self.activateWindow()
 
     def _on_toolbox_coords_change(self, rect):
@@ -189,7 +192,20 @@ class Shoppy(QtWidgets.QGraphicsView):
     def _drag_last_tangle(self):
         if self.settings.last_rectangles:
             self._dragtangle.setRect(*self.settings.last_rectangles[-1])
-            self.dimmer.cutout(self._dragtangle)
+            self._set_rectangle(self._dragtangle)
+
+    def _find_ffmpeg(self):
+        thread = FFMPegFinder(self)
+        thread.found.connect(self._found_ffmpeg)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _found_ffmpeg(self, path):
+        self._ffmpeg = path
+        self.toolbox.add_mode(MODE_VID)
+
+    def _change_mode(self, mode):
+        print('mode: %s' % mode)
 
 
 class Dimmer(QtCore.QObject):
@@ -298,6 +314,8 @@ class ToolBox(QtWidgets.QWidget):
 
         self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self._mode = MODE_CAM
+        self._modes = [self._mode]
+        self._modes_db = {MODE_CAM: img.camera, MODE_VID: img.video}
         self.show()
 
     def showEvent(self, event):
@@ -307,13 +325,23 @@ class ToolBox(QtWidgets.QWidget):
         self.setGeometry(toolgeo)
         return super().showEvent(event)
 
-    def toggle_mode(self):
-        if self._mode == MODE_CAM:
-            self._mode = MODE_VID
-            self.mode_button.setIcon(img.video)
+    def add_mode(self, mode):
+        if mode in self._modes_db:
+            self._modes.append(mode)
         else:
-            self._mode = MODE_CAM
-            self.mode_button.setIcon(img.camera)
+            RuntimeError('No Mode "%s"' % mode)
+
+    def toggle_mode(self):
+        i = self._modes.index(self._mode) + 1
+        if i == len(self._modes):
+            i = 0
+
+        new_mode = self._modes[i]
+        if new_mode == self._mode:
+            return
+
+        self._mode = new_mode
+        self.mode_button.setIcon(self._modes_db[self._mode])
         self.mode_switched.emit(self._mode)
 
     def x(self):
@@ -491,6 +519,29 @@ class _ImgStub:
 img = _ImgStub()
 
 
+class FFMPegFinder(QtCore.QThread):
+    found = QtCore.Signal(str)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+
+    def run(self):
+        found = _find_ffmpeg()
+        if found:
+            self.found.emit(found)
+
+
+def _find_ffmpeg():
+    import subprocess
+
+    try:
+        found = subprocess.check_output(['where', 'ffmpeg'])
+        return found.decode().strip()
+    except subprocess.CalledProcessError:
+        return ''
+
+
+def show():
     app = QtWidgets.QApplication([])
     view = Shoppy()
     view.show()
