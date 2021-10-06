@@ -8,7 +8,7 @@ LOG_LEVEL = logging.DEBUG
 log = logging.getLogger(NAME)
 log.setLevel(LOG_LEVEL)
 
-DIM_OPACITY = 150
+DIM_OPACITY = 110
 DIM_DURATION = 200
 DIM_INTERVAL = 20
 PATH = os.path.abspath(os.path.dirname(__file__))
@@ -24,6 +24,7 @@ class Shoppy(QtWidgets.QGraphicsView):
         screen = self._setup_ui()
         self.original_pixmap = screen.grabWindow(0)
         self.setBackgroundBrush(QtGui.QBrush(self.original_pixmap))
+        # self.setBackgroundBrush(QtGui.QBrush())
 
         self._dragging = False
         self._cursor_pos = QtGui.QCursor.pos()
@@ -31,9 +32,9 @@ class Shoppy(QtWidgets.QGraphicsView):
         self._panning = False
         self._pan_point = None
 
-        self.dimmer = Dimmer(self)
+        self.overlay = Overlay(self)
         self.set_cursor(QtCore.Qt.CrossCursor)
-        QtCore.QTimer(self).singleShot(100, self.dimmer.dim)
+        QtCore.QTimer(self).singleShot(200, self.overlay.dim)
 
         QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
         for seq in QtCore.Qt.Key_S, QtCore.Qt.CTRL + QtCore.Qt.Key_S:
@@ -107,15 +108,15 @@ class Shoppy(QtWidgets.QGraphicsView):
         self._pan_point = None
 
     def escape(self):
-        self.dimmer.finished.connect(self.close)
-        self.dimmer.undim()
+        self.overlay.finished.connect(self.close)
+        self.overlay.undim()
 
     def _setup_ui(self):
         self.setWindowTitle(NAME)
         self.setMouseTracking(True)
+
         screen = QtGui.QGuiApplication.primaryScreen()
         geo = screen.geometry()
-
         scene = QtWidgets.QGraphicsScene(0, 0, geo.width(), geo.height())
         self.setScene(scene)
         self.setViewportUpdateMode(QtWidgets.QGraphicsView.BoundingRectViewportUpdate)
@@ -124,7 +125,10 @@ class Shoppy(QtWidgets.QGraphicsView):
 
         # I wonder if this magic formula is the key to all desktops :|
         self.setGeometry(QtCore.QRect(-3, -6, geo.width() + 6, geo.height() + 12))
+
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
+        self.setStyleSheet("QGraphicsView {background:transparent;}")
         return screen
 
     def _build_toolbox(self):
@@ -134,11 +138,12 @@ class Shoppy(QtWidgets.QGraphicsView):
         self.toolbox.clip.connect(self.clip)
         self.toolbox.coords_changed.connect(self._on_toolbox_coords_change)
         self.toolbox.mode_switched.connect(self._change_mode)
+        self.toolbox.pointer_toggled.connect(self.toggle_pointer)
         self.activateWindow()
 
     def _on_toolbox_coords_change(self, rect):
         self._dragtangle.setRect(*rect.getRect())
-        self.dimmer.cutout(rect)
+        self.overlay.cutout(rect)
 
     def set_cursor(self, shape: QtCore.Qt.CursorShape):
         cursor = self.cursor()
@@ -155,14 +160,14 @@ class Shoppy(QtWidgets.QGraphicsView):
         if not file_path:
             return
 
-        self.dimmer.flash()
+        self.overlay.flash()
         cutout = self.original_pixmap.copy(self._dragtangle)
         cutout.save(file_path)
         self.settings.last_save_path = os.path.dirname(file_path)
         self._save_rect()
 
     def clip(self):
-        self.dimmer.flash()
+        self.overlay.flash()
         cutout = self.original_pixmap.copy(self._dragtangle)
         QtWidgets.QApplication.clipboard().setPixmap(cutout)
         self._save_rect()
@@ -180,7 +185,7 @@ class Shoppy(QtWidgets.QGraphicsView):
 
     def _set_rectangle(self, rect: QtCore.QRect):
         rect = rect.normalized()
-        self.dimmer.cutout(rect)
+        self.overlay.cutout(rect)
         self.toolbox.set_spinners(rect)
 
     def _drag_last_tangle(self):
@@ -202,11 +207,11 @@ class Shoppy(QtWidgets.QGraphicsView):
         print('mode: %s' % mode)
 
 
-class Dimmer(QtCore.QObject):
+class Overlay(QtCore.QObject):
     finished = QtCore.Signal()
 
     def __init__(self, parent):
-        super(Dimmer, self).__init__(parent)
+        super(Overlay, self).__init__(parent)
 
         self.geo = parent.geometry()
         self.r1 = QtWidgets.QGraphicsRectItem()
@@ -286,6 +291,7 @@ class ToolBox(QtWidgets.QWidget):
     save = QtCore.Signal()
     clip = QtCore.Signal()
     coords_changed = QtCore.Signal(QtCore.QRect)
+    pointer_toggled = QtCore.Signal(bool)
 
     def __init__(self, parent: Shoppy):
         super().__init__(parent)
@@ -396,7 +402,6 @@ class _TbSpin(QtWidgets.QSpinBox):
         self.setMinimum(0)
         self.setMaximum(6384)
         self.setValue(0)
-        self.setEnabled(False)
         self.setButtonSymbols(self.NoButtons)
         self.setStyleSheet(
             'QSpinBox {'
