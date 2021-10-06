@@ -43,7 +43,7 @@ class Shoppy(QtWidgets.QGraphicsView):
         for seq in QtCore.Qt.Key_C, QtCore.Qt.CTRL + QtCore.Qt.Key_C:
             QtWidgets.QShortcut(QtGui.QKeySequence(seq), self, self.clip)
 
-        self.toolbox = None
+        self.toolbox = None # type: None | ToolBox
         QtCore.QTimer(self).singleShot(400, self._build_toolbox)
         self.settings = Settings()
         self.settings.loaded.connect(self._drag_last_tangle)
@@ -62,7 +62,7 @@ class Shoppy(QtWidgets.QGraphicsView):
                     self._dragtangle.moveCenter(event.pos() - self._pan_point)
                 else:
                     self._dragtangle.setBottomRight(event.pos())
-                self.dimmer.cutout(self._dragtangle)
+                self._set_rectangle(self._dragtangle)
         else:
             if self._dragtangle.contains(event.pos()):
                 if self._panning:
@@ -136,7 +136,12 @@ class Shoppy(QtWidgets.QGraphicsView):
         self.toolbox.close_requested.connect(self.escape)
         self.toolbox.save.connect(self.save_shot)
         self.toolbox.clip.connect(self.clip)
+        self.toolbox.coords_changed.connect(self._on_toolbox_coords_change)
         self.activateWindow()
+
+    def _on_toolbox_coords_change(self, rect):
+        self._dragtangle.setRect(*rect.getRect())
+        self.dimmer.cutout(rect)
 
     def set_cursor(self, shape: QtCore.Qt.CursorShape):
         cursor = self.cursor()
@@ -173,8 +178,13 @@ class Shoppy(QtWidgets.QGraphicsView):
             self.settings.last_rectangles.remove(rect_list)
         self.settings.last_rectangles.append(rect_list)
         if len(self.settings.last_rectangles) > self.settings.max_rectangles:
-            del self.settings.last_rectangles[self.settings.max_rectangles :]
+            del self.settings.last_rectangles[:-self.settings.max_rectangles]
         self.settings._save()
+
+    def _set_rectangle(self, rect: QtCore.QRect):
+        rect = rect.normalized()
+        self.dimmer.cutout(rect)
+        self.toolbox.set_spinners(rect)
 
     def _drag_last_tangle(self):
         if self.settings.last_rectangles:
@@ -215,7 +225,6 @@ class Dimmer(QtCore.QObject):
         self._timer.setInterval(DIM_INTERVAL)
 
     def cutout(self, rect: QtCore.QRect):
-        rect = rect.normalized()
         gw, gh = self.geo.width(), self.geo.height()
         rw, rh = rect.width(), rect.height()
         self.r1.setRect(0, 0, gw, rect.y())
@@ -248,7 +257,7 @@ class Dimmer(QtCore.QObject):
             return
 
         new_value = self.color.alpha() + self._delta
-        self.color.setAlpha(new_value)
+        self.color.setAlpha(max(new_value, 0))
         for r in self.rects:
             r.setBrush(self.color)
 
@@ -266,16 +275,27 @@ class ToolBox(QtWidgets.QWidget):
     mode_switched = QtCore.Signal(str)
     save = QtCore.Signal()
     clip = QtCore.Signal()
+    coords_changed = QtCore.Signal(QtCore.QRect)
 
-    def __init__(self, parent):
+    def __init__(self, parent: Shoppy):
         super().__init__(parent)
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
+
+        _TbBtn(self, None)
+        self.spinners = []
+        for i in range(4):
+            spin = _TbSpin(self)
+            self.spinners.append(spin)
+            spin.valueChanged.connect(self.on_spin)
+
+        _TbBtn(self, img.down)
         _TbBtn(self, img.save, self.save.emit)
         _TbBtn(self, img.clipboard, self.clip.emit)
         self.mode_button = _TbBtn(self, img.camera, self.toggle_mode)
         self.settings_btn = _TbBtn(self, img.settings)
         _TbBtn(self, img.x, self.x)
+
         self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self._mode = MODE_CAM
         self.show()
@@ -300,18 +320,57 @@ class ToolBox(QtWidgets.QWidget):
         self.close_requested.emit()
         self.hide()
 
+    def on_spin(self):
+        coords = QtCore.QRect()
+        coords.setRect(*(s.value() for s in self.spinners))
+        self.coords_changed.emit(coords)
+
+    def set_spinners(self, rect: QtCore.QRect):
+        for value, spinbox in zip(rect.getRect(), self.spinners):
+            spinbox.blockSignals(True)
+            spinbox.setValue(value)
+            spinbox.setEnabled(True)
+            spinbox.blockSignals(False)
+
 
 class _TbBtn(QtWidgets.QToolButton):
-    def __init__(self, parent, icon, func=None):
+    def __init__(self, parent, icon=None, func=None):
         super().__init__(parent)
         if func is None:
             self.setEnabled(False)
         else:
             self.clicked.connect(func)
-        self.setIcon(icon)
+        if icon is not None:
+            self.setIcon(icon)
         self.setAutoRaise(True)
         self.setIconSize(QtCore.QSize(48, 48))
         parent.layout().addWidget(self)
+
+
+class _TbSpin(QtWidgets.QSpinBox):
+    def __init__(self, parent):
+        super().__init__(parent)
+        parent.layout().addWidget(self)
+        self.setMinimum(0)
+        self.setMaximum(16384)
+        self.setValue(0)
+        self.setEnabled(False)
+        self.setButtonSymbols(self.NoButtons)
+        self.setStyleSheet(
+            'QSpinBox {'
+            'border: 0; border-radius: 5px; font-size: 24px;'
+            'background: transparent; color: grey;'
+            '}'
+            'QSpinBox:hover {background: white; color: black}'
+        )
+
+    def leaveEvent(self, event: QtCore.QEvent):
+        self.setButtonSymbols(self.NoButtons)
+        return super().leaveEvent(event)
+
+    def enterEvent(self, event: QtCore.QEvent):
+        self.setButtonSymbols(self.UpDownArrows)
+        return super().leaveEvent(event)
 
 
 class Settings(QtCore.QObject):
@@ -432,8 +491,11 @@ class _ImgStub:
 img = _ImgStub()
 
 
-if __name__ == '__main__':
     app = QtWidgets.QApplication([])
     view = Shoppy()
     view.show()
     app.exec_()
+
+
+if __name__ == '__main__':
+    show()
