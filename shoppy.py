@@ -206,6 +206,10 @@ class Shoppy(QtWidgets.QGraphicsView):
     def _change_mode(self, mode):
         print('mode: %s' % mode)
 
+    def toggle_pointer(self, state):
+        self.settings.draw_pointer = state
+        self.settings._save()
+
 
 class Overlay(QtCore.QObject):
     finished = QtCore.Signal()
@@ -305,6 +309,10 @@ class ToolBox(QtWidgets.QWidget):
         _TbBtn(self, img.down)
         _TbBtn(self, img.save, self.save.emit)
         _TbBtn(self, img.clipboard, self.clip.emit)
+        if parent.settings.draw_pointer:
+            self.pointer_btn = _TbBtn(self, img.pointer, self.toggle_pointer)
+        else:
+            self.pointer_btn = _TbBtn(self, img.pointer_off, self.toggle_pointer)
         self.mode_button = _TbBtn(self, img.camera, self.toggle_mode)
         self.settings_btn = _TbBtn(self, img.settings)
         _TbBtn(self, img.x, self.x)
@@ -373,6 +381,14 @@ class ToolBox(QtWidgets.QWidget):
             spinbox.setEnabled(True)
             spinbox.blockSignals(False)
 
+    def toggle_pointer(self):
+        if self.parent().settings.draw_pointer:
+            self.pointer_btn.setIcon(img.pointer_off)
+            self.pointer_toggled.emit(False)
+        else:
+            self.pointer_btn.setIcon(img.pointer)
+            self.pointer_toggled.emit(True)
+
     def leaveEvent(self, event: QtCore.QEvent):
         self.setWindowOpacity(0.4)
         return super().leaveEvent(event)
@@ -428,6 +444,7 @@ class Settings(QtCore.QObject):
         self.last_save_path = ''
         self.last_rectangles = []
         self.max_rectangles = 12
+        self.draw_pointer = True
 
         self._settings_file = NAME.lower() + '.json'
         self._settings_path = os.path.join(PATH, self._settings_file)
@@ -456,7 +473,7 @@ class Settings(QtCore.QObject):
         for name, value in self.__dict__.items():
             if name.startswith('_'):
                 continue
-            if not isinstance(value, (str, int, list)):
+            if not isinstance(value, (str, int, list, bool)):
                 continue
             if name not in current:
                 do_write = True
@@ -501,6 +518,7 @@ class _ImgStub:
         self.pen = self._blank
         self.plus = self._blank
         self.pointer = self._blank
+        self.pointer_off = self._blank
         self.question = self._blank
         self.refresh = self._blank
         self.save = self._blank
