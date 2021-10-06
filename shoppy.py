@@ -1,10 +1,9 @@
 import os
 import time
+import logging
 from PySide2 import QtCore, QtGui, QtWidgets
 
 NAME = 'Shoppy'
-import logging
-
 LOG_LEVEL = logging.DEBUG
 log = logging.getLogger(NAME)
 log.setLevel(LOG_LEVEL)
@@ -22,20 +21,19 @@ class Shoppy(QtWidgets.QGraphicsView):
     def __init__(self):
         super(Shoppy, self).__init__()
 
+        screen = self._setup_ui()
+        self.original_pixmap = screen.grabWindow(0)
+        self.setBackgroundBrush(QtGui.QBrush(self.original_pixmap))
+
         self._dragging = False
         self._cursor_pos = QtGui.QCursor.pos()
         self._dragtangle = QtCore.QRect()
         self._panning = False
         self._pan_point = None
 
-        self.set_cursor(QtCore.Qt.CrossCursor)
-
-        screen = self._setup_ui()
-        self.original_pixmap = screen.grabWindow(0)
-        self.setBackgroundBrush(QtGui.QBrush(self.original_pixmap))
-
         self.dimmer = Dimmer(self)
-        QtCore.QTimer(self).singleShot(300, self.dimmer.dim)
+        self.set_cursor(QtCore.Qt.CrossCursor)
+        QtCore.QTimer(self).singleShot(100, self.dimmer.dim)
 
         QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
         for seq in QtCore.Qt.Key_S, QtCore.Qt.CTRL + QtCore.Qt.Key_S:
@@ -72,7 +70,7 @@ class Shoppy(QtWidgets.QGraphicsView):
                 self._panning = True
                 self.set_cursor(QtCore.Qt.OpenHandCursor)
             else:
-                self.pan_off()
+                self._pan_off()
                 self.set_cursor(QtCore.Qt.CrossCursor)
 
         return super().mouseMoveEvent(event)
@@ -91,7 +89,7 @@ class Shoppy(QtWidgets.QGraphicsView):
         if self._panning and event.key() == QtCore.Qt.Key_Space:
             if event.isAutoRepeat():
                 return
-            self.pan_off()
+            self._pan_off()
             self.set_cursor(QtCore.Qt.CrossCursor)
             return
         return super().keyReleaseEvent(event)
@@ -101,20 +99,16 @@ class Shoppy(QtWidgets.QGraphicsView):
             self._dragging = False
         if self._dragtangle.contains(event.pos()):
             self.set_cursor(QtCore.Qt.OpenHandCursor)
-        self.pan_off()
+        self._pan_off()
         return super().mouseReleaseEvent(event)
 
-    def pan_off(self):
+    def _pan_off(self):
         self._panning = False
         self._pan_point = None
 
     def escape(self):
         self.dimmer.finished.connect(self.close)
         self.dimmer.undim()
-
-    def resizeEvent(self, event):
-        super(Shoppy, self).resizeEvent(event)
-        self.fitInView(self.sceneRect(), QtCore.Qt.KeepAspectRatio)
 
     def _setup_ui(self):
         self.setWindowTitle(NAME)
@@ -300,10 +294,7 @@ class ToolBox(QtWidgets.QWidget):
 
         _TbBtn(self, None)
         self.spinners = []
-        for i in range(4):
-            spin = _TbSpin(self)
-            self.spinners.append(spin)
-            spin.valueChanged.connect(self.on_spin)
+        QtCore.QTimer(self).singleShot(100, self._add_spinners)
 
         _TbBtn(self, img.down)
         _TbBtn(self, img.save, self.save.emit)
@@ -317,13 +308,29 @@ class ToolBox(QtWidgets.QWidget):
         self._modes = [self._mode]
         self._modes_db = {MODE_CAM: img.camera, MODE_VID: img.video}
         self.show()
+        self.setWindowOpacity(0.4)
+
+    def _add_spinners(self):
+        layout = self.layout()
+        last_rects = self.parent().settings.last_rectangles
+        for i in range(4):
+            spin = _TbSpin(self)
+            if last_rects:
+                spin.setValue(last_rects[-1][i])
+            layout.insertWidget(1 + i, spin)
+            self.spinners.append(spin)
+            spin.valueChanged.connect(self.on_spin)
+        QtCore.QTimer(self).singleShot(5, self._center_box)
 
     def showEvent(self, event):
+        self._center_box()
+        return super().showEvent(event)
+
+    def _center_box(self):
         toolgeo = self.geometry()
         toolgeo.moveCenter(self.parent().geometry().center())
         toolgeo.moveTop(0)
         self.setGeometry(toolgeo)
-        return super().showEvent(event)
 
     def add_mode(self, mode):
         if mode in self._modes_db:
@@ -360,6 +367,14 @@ class ToolBox(QtWidgets.QWidget):
             spinbox.setEnabled(True)
             spinbox.blockSignals(False)
 
+    def leaveEvent(self, event: QtCore.QEvent):
+        self.setWindowOpacity(0.4)
+        return super().leaveEvent(event)
+
+    def enterEvent(self, event: QtCore.QEvent):
+        self.setWindowOpacity(0.8)
+        return super().leaveEvent(event)
+
 
 class _TbBtn(QtWidgets.QToolButton):
     def __init__(self, parent, icon=None, func=None):
@@ -378,9 +393,8 @@ class _TbBtn(QtWidgets.QToolButton):
 class _TbSpin(QtWidgets.QSpinBox):
     def __init__(self, parent):
         super().__init__(parent)
-        parent.layout().addWidget(self)
         self.setMinimum(0)
-        self.setMaximum(16384)
+        self.setMaximum(6384)
         self.setValue(0)
         self.setEnabled(False)
         self.setButtonSymbols(self.NoButtons)
@@ -534,8 +548,12 @@ class FFMPegFinder(QtCore.QThread):
 def _find_ffmpeg():
     import subprocess
 
+    nfo = subprocess.STARTUPINFO()
+    nfo.wShowWindow = subprocess.SW_HIDE
+    nfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
     try:
-        found = subprocess.check_output(['where', 'ffmpeg'])
+        found = subprocess.check_output(['where', 'ffmpeg'], startupinfo=nfo)
         return found.decode().strip()
     except subprocess.CalledProcessError:
         return ''
