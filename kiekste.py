@@ -8,7 +8,7 @@ try:
 except AttributeError:
     QShortcut = QtGui.QShortcut
 
-NAME = 'Shoppy'
+NAME = 'kiekste'
 LOG_LEVEL = logging.DEBUG
 log = logging.getLogger(NAME)
 log.setLevel(LOG_LEVEL)
@@ -25,9 +25,9 @@ MODE_VID = 'Video'
 cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
 
 
-class Shoppy(QtWidgets.QGraphicsView):
+class Kiekste(QtWidgets.QGraphicsView):
     def __init__(self):
-        super(Shoppy, self).__init__()
+        super().__init__()
 
         self._dragging = False
         self._cursor_pos = QtGui.QCursor.pos()
@@ -49,7 +49,7 @@ class Shoppy(QtWidgets.QGraphicsView):
         for seq in QtCore.Qt.Key_C, QtCore.Qt.CTRL + QtCore.Qt.Key_C:
             QShortcut(QtGui.QKeySequence(seq), self, self.clip)
 
-        for side in cursor_keys.keys():
+        for side in cursor_keys:
             QShortcut(QtGui.QKeySequence.fromString(side), self, self.tl_view)
 
         self.toolbox = None  # type: None | ToolBox
@@ -161,9 +161,9 @@ class Shoppy(QtWidgets.QGraphicsView):
 
         # Now because of this we need to adjust the scaling to compensate for that.
         # on top of the scaling we do for HighDPI scaled desktop vs pixels grabbed.
-        fw = geo.width() / geo_hack.width() + 0.001
-        pr = self.pixmap.rect()
-        self.scale(geo.width() * fw / pr.width(), geo.height() / pr.height())
+        width_factor = geo.width() / geo_hack.width() + 0.001
+        pix_rect = self.pixmap.rect()
+        self.scale(geo.width() * width_factor / pix_rect.width(), geo.height() / pix_rect.height())
 
         self.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
         self.show()
@@ -254,8 +254,7 @@ class Overlay(QtCore.QObject):
     finished = QtCore.Signal()
 
     def __init__(self, parent):
-        super(Overlay, self).__init__(parent)
-
+        super().__init__(parent)
         self.geo = parent.geometry()
         self.r1 = QtWidgets.QGraphicsRectItem()
         self.r2 = QtWidgets.QGraphicsRectItem()
@@ -281,14 +280,18 @@ class Overlay(QtCore.QObject):
         self._timer = QtCore.QTimer(parent)
         self._timer.timeout.connect(self._update)
         self._timer.setInterval(DIM_INTERVAL)
+        self._rect_set = False
 
-    def cutout(self, rect: QtCore.QRect):
-        gw, gh = self.geo.width(), self.geo.height()
-        rw, rh = rect.width(), rect.height()
-        self.r1.setRect(0, 0, gw, rect.y())
-        self.r2.setRect(0, rect.y(), rect.x(), rh)
-        self.r3.setRect(rect.x() + rw, rect.y(), gw - rw - rect.x(), rh)
-        self.r4.setRect(0, rh + rect.y(), gw, gh - rh - rect.y())
+    def cutout(self, rect: QtCore.QRect = None):
+        if rect is None:
+            rect = QtCore.QRect()
+        self._rect_set = True
+        geow, geoh = self.geo.width(), self.geo.height()
+        recw, rech = rect.width(), rect.height()
+        self.r1.setRect(0, 0, geow, rect.y())
+        self.r2.setRect(0, rect.y(), rect.x(), rech)
+        self.r3.setRect(rect.x() + recw, rect.y(), geow - recw - rect.x(), rech)
+        self.r4.setRect(0, rech + rect.y(), geow, geoh - rech - rect.y())
         self.rx.setRect(rect)
 
     def _set_outer(self):
@@ -296,6 +299,8 @@ class Overlay(QtCore.QObject):
         self.color = QtGui.QColor(QtCore.Qt.black)
 
     def dim(self):
+        if not self._rect_set:
+            self.cutout()
         self._ticks = DIM_DURATION / DIM_INTERVAL
         self._delta = DIM_OPACITY / self._ticks
         self._timer.start()
@@ -336,7 +341,7 @@ class ToolBox(QtWidgets.QWidget):
     coords_changed = QtCore.Signal(QtCore.QRect)
     pointer_toggled = QtCore.Signal(bool)
 
-    def __init__(self, parent: Shoppy):
+    def __init__(self, parent: Kiekste):
         super().__init__(parent)
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -623,7 +628,7 @@ def _find_ffmpeg():
 
 def show():
     app = QtWidgets.QApplication([])
-    win = Shoppy()
+    win = Kiekste()
     win.show()
     app.exec_()
 
