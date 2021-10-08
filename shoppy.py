@@ -3,6 +3,11 @@ import time
 import logging
 from PySide2 import QtCore, QtGui, QtWidgets
 
+try:
+    QShortcut = QtWidgets.QShortcut
+except AttributeError:
+    QShortcut = QtGui.QShortcut
+
 NAME = 'Shoppy'
 LOG_LEVEL = logging.DEBUG
 log = logging.getLogger(NAME)
@@ -17,14 +22,12 @@ MODE_CAM = 'Image'
 MODE_VID = 'Video'
 
 
+cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
+
+
 class Shoppy(QtWidgets.QGraphicsView):
     def __init__(self):
         super(Shoppy, self).__init__()
-
-        screen = self._setup_ui()
-        self.original_pixmap = screen.grabWindow(0)
-        self.setBackgroundBrush(QtGui.QBrush(self.original_pixmap))
-        # self.setBackgroundBrush(QtGui.QBrush())
 
         self._dragging = False
         self._cursor_pos = QtGui.QCursor.pos()
@@ -32,22 +35,41 @@ class Shoppy(QtWidgets.QGraphicsView):
         self._panning = False
         self._pan_point = None
 
+        self._setup_ui()
+
+        # self.setBackgroundBrush(QtGui.QBrush())
+
         self.overlay = Overlay(self)
         self.set_cursor(QtCore.Qt.CrossCursor)
         QtCore.QTimer(self).singleShot(200, self.overlay.dim)
 
-        QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
+        QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
         for seq in QtCore.Qt.Key_S, QtCore.Qt.CTRL + QtCore.Qt.Key_S:
-            QtWidgets.QShortcut(QtGui.QKeySequence(seq), self, self.save_shot)
+            QShortcut(QtGui.QKeySequence(seq), self, self.save_shot)
         for seq in QtCore.Qt.Key_C, QtCore.Qt.CTRL + QtCore.Qt.Key_C:
-            QtWidgets.QShortcut(QtGui.QKeySequence(seq), self, self.clip)
+            QShortcut(QtGui.QKeySequence(seq), self, self.clip)
 
-        self.toolbox = None # type: None | ToolBox
+        for side in cursor_keys.keys():
+            QShortcut(QtGui.QKeySequence.fromString(side), self, self.tl_view)
+
+        self.toolbox = None  # type: None | ToolBox
         QtCore.QTimer(self).singleShot(400, self._build_toolbox)
         self.settings = Settings()
         self.settings.loaded.connect(self._drag_last_tangle)
         self._ffmpeg = ''
         QtCore.QTimer(self).singleShot(400, self._find_ffmpeg)
+
+    def tl_view(self):
+        trigger_key = self.sender().key().toString()
+        for side, shift in cursor_keys.items():
+            if trigger_key == side:
+                # print('side: %s' % side)
+                # print('(scale_x %f _scale_y): %f' % (self._scale_x, self._scale_y))
+                # self._scale_x += (shift[0] * 0.01)
+                # self._scale_y += (shift[1] * 0.01)
+                # print('(scale_x %f _scale_y): %f' % (self._scale_x, self._scale_y))
+                self.scale((1 + (shift[0] * 0.0001)), (1 + (shift[1] * 0.0001)))
+                return
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.buttons() & QtCore.Qt.LeftButton:
@@ -114,21 +136,37 @@ class Shoppy(QtWidgets.QGraphicsView):
     def _setup_ui(self):
         self.setWindowTitle(NAME)
         self.setMouseTracking(True)
+        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
 
         screen = QtGui.QGuiApplication.primaryScreen()
         geo = screen.geometry()
+        self.pixmap = screen.grabWindow(0)
+        self.setBackgroundBrush(QtGui.QBrush(self.pixmap))
+
         scene = QtWidgets.QGraphicsScene(0, 0, geo.width(), geo.height())
         self.setScene(scene)
         self.setViewportUpdateMode(QtWidgets.QGraphicsView.BoundingRectViewportUpdate)
         self.setCacheMode(QtWidgets.QGraphicsView.CacheBackground)
         self.setRenderHints(QtGui.QPainter.Antialiasing | QtGui.QPainter.SmoothPixmapTransform)
 
-        # I wonder if this magic formula is the key to all desktops :|
-        self.setGeometry(QtCore.QRect(-3, -6, geo.width() + 6, geo.height() + 12))
-
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
-        self.setStyleSheet("QGraphicsView {background:transparent;}")
+        self.setStyleSheet('QGraphicsView {background:transparent;}')
+
+        # Because there is a white border that I can't get rid of,
+        # lets shift and size the window a little:
+        geo_hack = QtCore.QRect(-1, -1, geo.width() + 2, geo.height() + 3)
+        self.setGeometry(geo_hack)
+
+        # Now because of this we need to adjust the scaling to compensate for that.
+        # on top of the scaling we do for HighDPI scaled desktop vs pixels grabbed.
+        fw = geo.width() / geo_hack.width() + 0.001
+        pr = self.pixmap.rect()
+        self.scale(geo.width() * fw / pr.width(), geo.height() / pr.height())
+
+        self.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+        self.show()
         return screen
 
     def _build_toolbox(self):
@@ -161,14 +199,15 @@ class Shoppy(QtWidgets.QGraphicsView):
             return
 
         self.overlay.flash()
-        cutout = self.original_pixmap.copy(self._dragtangle)
+        cutout = self.pixmap.copy(self._dragtangle)
         cutout.save(file_path)
         self.settings.last_save_path = os.path.dirname(file_path)
         self._save_rect()
 
     def clip(self):
         self.overlay.flash()
-        cutout = self.original_pixmap.copy(self._dragtangle)
+        cutout = self.pixmap.copy(self._dragtangle)
+        print('self._dragtangle: %s' % self._dragtangle)
         QtWidgets.QApplication.clipboard().setPixmap(cutout)
         self._save_rect()
 
@@ -180,7 +219,7 @@ class Shoppy(QtWidgets.QGraphicsView):
             self.settings.last_rectangles.remove(rect_list)
         self.settings.last_rectangles.append(rect_list)
         if len(self.settings.last_rectangles) > self.settings.max_rectangles:
-            del self.settings.last_rectangles[:-self.settings.max_rectangles]
+            del self.settings.last_rectangles[: -self.settings.max_rectangles]
         self.settings._save()
 
     def _set_rectangle(self, rect: QtCore.QRect):
@@ -584,8 +623,8 @@ def _find_ffmpeg():
 
 def show():
     app = QtWidgets.QApplication([])
-    view = Shoppy()
-    view.show()
+    win = Shoppy()
+    win.show()
     app.exec_()
 
 
