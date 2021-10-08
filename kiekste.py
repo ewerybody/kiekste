@@ -63,12 +63,10 @@ class Kiekste(QtWidgets.QGraphicsView):
         trigger_key = self.sender().key().toString()
         for side, shift in cursor_keys.items():
             if trigger_key == side:
-                # print('side: %s' % side)
-                # print('(scale_x %f _scale_y): %f' % (self._scale_x, self._scale_y))
-                # self._scale_x += (shift[0] * 0.01)
-                # self._scale_y += (shift[1] * 0.01)
-                # print('(scale_x %f _scale_y): %f' % (self._scale_x, self._scale_y))
-                self.scale((1 + (shift[0] * 0.0001)), (1 + (shift[1] * 0.0001)))
+                self._dragtangle.moveTo(
+                    self._dragtangle.x() + shift[0], self._dragtangle.y() + shift[1]
+                )
+                self._set_rectangle(self._dragtangle)
                 return
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
