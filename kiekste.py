@@ -197,15 +197,14 @@ class Kiekste(QtWidgets.QGraphicsView):
             return
 
         self.overlay.flash()
-        cutout = self.pixmap.copy(self._dragtangle)
+        cutout = self.pixmap.copy(self._dragtangle.normalized())
         cutout.save(file_path)
         self.settings.last_save_path = os.path.dirname(file_path)
         self._save_rect()
 
     def clip(self):
         self.overlay.flash()
-        cutout = self.pixmap.copy(self._dragtangle)
-        print('self._dragtangle: %s' % self._dragtangle)
+        cutout = self.pixmap.copy(self._dragtangle.normalized())
         QtWidgets.QApplication.clipboard().setPixmap(cutout)
         self._save_rect()
 
