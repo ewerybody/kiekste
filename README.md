@@ -20,3 +20,8 @@ On top of these there are SO much more awesome things one can do. Of course I'd 
 - [ ] draw other things on the shot right away without opening something else.
 - [ ] upload to favorite targets
 - [ ] ...
+
+# Thanks 🙏
+* [Python](https://github.com/python)
+* [Qt for Python](https://doc.qt.io/qtforpython)
+* [feathericons](https://github.com/feathericons/feather)
