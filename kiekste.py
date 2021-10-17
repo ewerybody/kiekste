@@ -1,25 +1,21 @@
 import os
 import time
 import logging
-from PySide2 import QtCore, QtGui, QtWidgets
 
-try:
-    QShortcut = QtWidgets.QShortcut
-except AttributeError:
-    QShortcut = QtGui.QShortcut
+import image_stub
+from pyside import QtCore, QtGui, QtWidgets, QShortcut
 
 NAME = 'kiekste'
+PATH = os.path.abspath(os.path.dirname(__file__))
 LOG_LEVEL = logging.DEBUG
 log = logging.getLogger(NAME)
 log.setLevel(LOG_LEVEL)
-
 DIM_OPACITY = 110
 DIM_DURATION = 200
 DIM_INTERVAL = 20
-PATH = os.path.abspath(os.path.dirname(__file__))
-IMG_PATH = os.path.join(PATH, 'img')
 MODE_CAM = 'Image'
 MODE_VID = 'Video'
+IMG = image_stub.ImageStub()
 
 
 cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
@@ -220,6 +216,8 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.settings._save()
 
     def _set_rectangle(self, rect: QtCore.QRect):
+        if self.toolbox is None:
+            return
         rect = rect.normalized()
         self.overlay.cutout(rect)
         self.toolbox.set_spinners(rect)
@@ -236,6 +234,8 @@ class Kiekste(QtWidgets.QGraphicsView):
         thread.start()
 
     def _found_ffmpeg(self, path):
+        if self.toolbox is None:
+            return
         self._ffmpeg = path
         self.toolbox.add_mode(MODE_VID)
 
@@ -250,8 +250,9 @@ class Kiekste(QtWidgets.QGraphicsView):
 class Overlay(QtCore.QObject):
     finished = QtCore.Signal()
 
-    def __init__(self, parent):
+    def __init__(self, parent: Kiekste):
         super().__init__(parent)
+        self._parent = parent
         self.geo = parent.geometry()
         self.r1 = QtWidgets.QGraphicsRectItem()
         self.r2 = QtWidgets.QGraphicsRectItem()
@@ -340,6 +341,7 @@ class ToolBox(QtWidgets.QWidget):
 
     def __init__(self, parent: Kiekste):
         super().__init__(parent)
+        self._parent = parent
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
@@ -347,27 +349,27 @@ class ToolBox(QtWidgets.QWidget):
         self.spinners = []
         QtCore.QTimer(self).singleShot(100, self._add_spinners)
 
-        _TbBtn(self, img.down)
-        _TbBtn(self, img.save, self.save.emit)
-        _TbBtn(self, img.clipboard, self.clip.emit)
+        _TbBtn(self, IMG.down)
+        _TbBtn(self, IMG.save, self.save.emit)
+        _TbBtn(self, IMG.clipboard, self.clip.emit)
         if parent.settings.draw_pointer:
-            self.pointer_btn = _TbBtn(self, img.pointer, self.toggle_pointer)
+            self.pointer_btn = _TbBtn(self, IMG.pointer, self.toggle_pointer)
         else:
-            self.pointer_btn = _TbBtn(self, img.pointer_off, self.toggle_pointer)
-        self.mode_button = _TbBtn(self, img.camera, self.toggle_mode)
-        self.settings_btn = _TbBtn(self, img.settings)
-        _TbBtn(self, img.x, self.x)
+            self.pointer_btn = _TbBtn(self, IMG.pointer_off, self.toggle_pointer)
+        self.mode_button = _TbBtn(self, IMG.camera, self.toggle_mode)
+        self.settings_btn = _TbBtn(self, IMG.settings)
+        _TbBtn(self, IMG.x, self.x)
 
         self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self._mode = MODE_CAM
         self._modes = [self._mode]
-        self._modes_db = {MODE_CAM: img.camera, MODE_VID: img.video}
+        self._modes_db = {MODE_CAM: IMG.camera, MODE_VID: IMG.video}
         self.show()
         self.setWindowOpacity(0.4)
 
     def _add_spinners(self):
         layout = self.layout()
-        last_rects = self.parent().settings.last_rectangles
+        last_rects = self._parent.settings.last_rectangles
         for i in range(4):
             spin = _TbSpin(self)
             if last_rects:
@@ -383,7 +385,7 @@ class ToolBox(QtWidgets.QWidget):
 
     def _center_box(self):
         toolgeo = self.geometry()
-        toolgeo.moveCenter(self.parent().geometry().center())
+        toolgeo.moveCenter(self._parent.geometry().center())
         toolgeo.moveTop(0)
         self.setGeometry(toolgeo)
 
@@ -423,11 +425,11 @@ class ToolBox(QtWidgets.QWidget):
             spinbox.blockSignals(False)
 
     def toggle_pointer(self):
-        if self.parent().settings.draw_pointer:
-            self.pointer_btn.setIcon(img.pointer_off)
+        if self._parent.settings.draw_pointer:
+            self.pointer_btn.setIcon(IMG.pointer_off)
             self.pointer_toggled.emit(False)
         else:
-            self.pointer_btn.setIcon(img.pointer)
+            self.pointer_btn.setIcon(IMG.pointer)
             self.pointer_toggled.emit(True)
 
     def leaveEvent(self, event: QtCore.QEvent):
@@ -529,72 +531,6 @@ class Settings(QtCore.QObject):
 
         with open(self._settings_path, 'w') as file_obj:
             json.dump(current, file_obj, indent=2, sort_keys=True)
-
-
-class _ImgStub:
-    """
-    Load-only-once image library object.
-
-    For convenience this already lists all usable icons and for speed it
-    just loads them up when actually needed.
-    """
-
-    def __init__(self):
-        self._blank = self._get_ico()
-        self.camera = self._blank
-        self.check = self._blank
-        self.clipboard = self._blank
-        self.crop = self._blank
-        self.down = self._blank
-        self.edit = self._blank
-        self.file = self._blank
-        self.film = self._blank
-        self.folder = self._blank
-        self.github = self._blank
-        self.info = self._blank
-        self.link = self._blank
-        self.maximize = self._blank
-        self.monitor = self._blank
-        self.move = self._blank
-        self.pen = self._blank
-        self.plus = self._blank
-        self.pointer = self._blank
-        self.pointer_off = self._blank
-        self.question = self._blank
-        self.refresh = self._blank
-        self.save = self._blank
-        self.settings = self._blank
-        self.type = self._blank
-        self.update = self._blank
-        self.upload = self._blank
-        self.upload2 = self._blank
-        self.video = self._blank
-        self.x = self._blank
-
-    def __getattribute__(self, name):
-        try:
-            obj = super(_ImgStub, self).__getattribute__(name)
-        except AttributeError:
-            log.error('Icons lib got request for inexistent icon:\n  "%s"!', name)
-            return self._blank
-
-        if not name.startswith('_'):
-            if obj is self._blank:
-                icon = self._get_ico(name)
-                setattr(self, name, icon)
-                return icon
-        return obj
-
-    def _get_ico(self, name=''):
-        if name:
-            path = os.path.join(IMG_PATH, name + '.svg')
-            if os.path.isfile(path):
-                return QtGui.QIcon(path)
-            log.error('No such file: {path}')
-        return QtGui.QIcon()
-
-
-img = _ImgStub()
 
 
 class FFMPegFinder(QtCore.QThread):
