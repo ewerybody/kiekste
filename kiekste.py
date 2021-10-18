@@ -1,8 +1,9 @@
 import os
-import time
 import logging
 
 import image_stub
+import video_man
+import widgets
 from pyside import QtCore, QtGui, QtWidgets, QShortcut
 
 NAME = 'kiekste'
@@ -32,12 +33,10 @@ class Kiekste(QtWidgets.QGraphicsView):
         self._pan_point = None
 
         self._setup_ui()
+        self.overlay = Overlay(self)
+        self.overlay.cursor_change.connect(self.set_cursor)
 
         # self.setBackgroundBrush(QtGui.QBrush())
-
-        self.overlay = Overlay(self)
-        self.set_cursor(QtCore.Qt.CrossCursor)
-        QtCore.QTimer(self).singleShot(200, self.overlay.dim)
 
         QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
         for seq in QtCore.Qt.Key_S, QtCore.Qt.CTRL + QtCore.Qt.Key_S:
@@ -46,16 +45,23 @@ class Kiekste(QtWidgets.QGraphicsView):
             QShortcut(QtGui.QKeySequence(seq), self, self.clip)
 
         for side in cursor_keys:
-            QShortcut(QtGui.QKeySequence.fromString(side), self, self.tl_view)
+            QShortcut(QtGui.QKeySequence.fromString(side), self, self.shift_view)
 
         self.toolbox = None  # type: None | ToolBox
-        QtCore.QTimer(self).singleShot(400, self._build_toolbox)
         self.settings = Settings()
         self.settings.loaded.connect(self._drag_last_tangle)
-        self._ffmpeg = ''
-        QtCore.QTimer(self).singleShot(400, self._find_ffmpeg)
+        self.videoman = video_man.VideoMan(self)
+        self.videoman.video_found.connect(self._found_video_tool)
 
-    def tl_view(self):
+        self.set_cursor(QtCore.Qt.CrossCursor)
+        self.show()
+
+    def showEvent(self, event):
+        self.overlay.dim()
+        self._build_toolbox()
+        return super().showEvent(event)
+
+    def shift_view(self):
         trigger_key = self.sender().key().toString()
         for side, shift in cursor_keys.items():
             if trigger_key == side:
@@ -66,7 +72,11 @@ class Kiekste(QtWidgets.QGraphicsView):
                 return
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        self.overlay.cursor_move(event.pos())
+
         if event.buttons() & QtCore.Qt.LeftButton:
+            self.overlay.mouse_press(True)
+
             if not self._dragging and not self._panning:
                 self._dragtangle.setTopLeft(event.pos())
                 self._dragging = True
@@ -93,6 +103,11 @@ class Kiekste(QtWidgets.QGraphicsView):
         return super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        if event.key() == QtCore.Qt.Key_Space:
+            if event.isAutoRepeat():
+                return
+            self.overlay.space_press(True)
+
         if self._dragging and not self._panning and event.key() == QtCore.Qt.Key_Space:
             if event.isAutoRepeat():
                 return
@@ -112,6 +127,8 @@ class Kiekste(QtWidgets.QGraphicsView):
         return super().keyReleaseEvent(event)
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        self.overlay.mouse_press(False)
+
         if self._dragging:
             self._dragging = False
         if self._dragtangle.contains(event.pos()):
@@ -160,7 +177,6 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.scale(geo.width() * width_factor / pix_rect.width(), geo.height() / pix_rect.height())
 
         self.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
-        self.show()
         return screen
 
     def _build_toolbox(self):
@@ -168,14 +184,10 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.toolbox.close_requested.connect(self.escape)
         self.toolbox.save.connect(self.save_shot)
         self.toolbox.clip.connect(self.clip)
-        self.toolbox.coords_changed.connect(self._on_toolbox_coords_change)
+        self.toolbox.coords_changed.connect(self.overlay.set_rect)
         self.toolbox.mode_switched.connect(self._change_mode)
         self.toolbox.pointer_toggled.connect(self.toggle_pointer)
         self.activateWindow()
-
-    def _on_toolbox_coords_change(self, rect):
-        self._dragtangle.setRect(*rect.getRect())
-        self.overlay.cutout(rect)
 
     def set_cursor(self, shape: QtCore.Qt.CursorShape):
         cursor = self.cursor()
@@ -219,7 +231,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         if self.toolbox is None:
             return
         rect = rect.normalized()
-        self.overlay.cutout(rect)
+        self.overlay.set_rect(rect)
         self.toolbox.set_spinners(rect)
 
     def _drag_last_tangle(self):
@@ -227,16 +239,9 @@ class Kiekste(QtWidgets.QGraphicsView):
             self._dragtangle.setRect(*self.settings.last_rectangles[-1])
             self._set_rectangle(self._dragtangle)
 
-    def _find_ffmpeg(self):
-        thread = FFMPegFinder(self)
-        thread.found.connect(self._found_ffmpeg)
-        thread.finished.connect(thread.deleteLater)
-        thread.start()
-
-    def _found_ffmpeg(self, path):
+    def _found_video_tool(self):
         if self.toolbox is None:
             return
-        self._ffmpeg = path
         self.toolbox.add_mode(MODE_VID)
 
     def _change_mode(self, mode):
@@ -249,10 +254,13 @@ class Kiekste(QtWidgets.QGraphicsView):
 
 class Overlay(QtCore.QObject):
     finished = QtCore.Signal()
+    cursor_change = QtCore.Signal(QtCore.Qt.CursorShape)
 
     def __init__(self, parent: Kiekste):
         super().__init__(parent)
         self._parent = parent
+        self._lmouse = False
+
         self.geo = parent.geometry()
         self.r1 = QtWidgets.QGraphicsRectItem()
         self.r2 = QtWidgets.QGraphicsRectItem()
@@ -280,9 +288,20 @@ class Overlay(QtCore.QObject):
         self._timer.setInterval(DIM_INTERVAL)
         self._rect_set = False
 
-    def cutout(self, rect: QtCore.QRect = None):
-        if rect is None:
-            rect = QtCore.QRect()
+    @property
+    def rect(self):
+        return
+
+    def cursor_move(self, pos: QtCore.QPoint):
+        pass
+
+    def mouse_press(self, state):
+        self._lmouse = state
+
+    def space_press(self, state):
+        self._space = state
+
+    def set_rect(self, rect: QtCore.QRect):
         self._rect_set = True
         geow, geoh = self.geo.width(), self.geo.height()
         recw, rech = rect.width(), rect.height()
@@ -298,7 +317,7 @@ class Overlay(QtCore.QObject):
 
     def dim(self):
         if not self._rect_set:
-            self.cutout()
+            self.set_rect(QtCore.QRect())
         self._ticks = DIM_DURATION / DIM_INTERVAL
         self._delta = DIM_OPACITY / self._ticks
         self._timer.start()
@@ -345,20 +364,20 @@ class ToolBox(QtWidgets.QWidget):
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        _TbBtn(self, None)
+        widgets._TbBtn(self, None)
         self.spinners = []
         QtCore.QTimer(self).singleShot(100, self._add_spinners)
 
-        _TbBtn(self, IMG.down)
-        _TbBtn(self, IMG.save, self.save.emit)
-        _TbBtn(self, IMG.clipboard, self.clip.emit)
+        widgets._TbBtn(self, IMG.down)
+        widgets._TbBtn(self, IMG.save, self.save.emit)
+        widgets._TbBtn(self, IMG.clipboard, self.clip.emit)
         if parent.settings.draw_pointer:
-            self.pointer_btn = _TbBtn(self, IMG.pointer, self.toggle_pointer)
+            self.pointer_btn = widgets._TbBtn(self, IMG.pointer, self.toggle_pointer)
         else:
-            self.pointer_btn = _TbBtn(self, IMG.pointer_off, self.toggle_pointer)
-        self.mode_button = _TbBtn(self, IMG.camera, self.toggle_mode)
-        self.settings_btn = _TbBtn(self, IMG.settings)
-        _TbBtn(self, IMG.x, self.x)
+            self.pointer_btn = widgets._TbBtn(self, IMG.pointer_off, self.toggle_pointer)
+        self.mode_button = widgets._TbBtn(self, IMG.camera, self.toggle_mode)
+        self.settings_btn = widgets._TbBtn(self, IMG.settings)
+        widgets._TbBtn(self, IMG.x, self.x)
 
         self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self._mode = MODE_CAM
@@ -371,7 +390,7 @@ class ToolBox(QtWidgets.QWidget):
         layout = self.layout()
         last_rects = self._parent.settings.last_rectangles
         for i in range(4):
-            spin = _TbSpin(self)
+            spin = widgets._TbSpin(self)
             if last_rects:
                 spin.setValue(last_rects[-1][i])
             layout.insertWidget(1 + i, spin)
@@ -441,44 +460,6 @@ class ToolBox(QtWidgets.QWidget):
         return super().leaveEvent(event)
 
 
-class _TbBtn(QtWidgets.QToolButton):
-    def __init__(self, parent, icon=None, func=None):
-        super().__init__(parent)
-        if func is None:
-            self.setEnabled(False)
-        else:
-            self.clicked.connect(func)
-        if icon is not None:
-            self.setIcon(icon)
-        self.setAutoRaise(True)
-        self.setIconSize(QtCore.QSize(48, 48))
-        parent.layout().addWidget(self)
-
-
-class _TbSpin(QtWidgets.QSpinBox):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setMinimum(0)
-        self.setMaximum(6384)
-        self.setValue(0)
-        self.setButtonSymbols(self.NoButtons)
-        self.setStyleSheet(
-            'QSpinBox {'
-            'border: 0; border-radius: 5px; font-size: 24px;'
-            'background: transparent; color: grey;'
-            '}'
-            'QSpinBox:hover {background: white; color: black}'
-        )
-
-    def leaveEvent(self, event: QtCore.QEvent):
-        self.setButtonSymbols(self.NoButtons)
-        return super().leaveEvent(event)
-
-    def enterEvent(self, event: QtCore.QEvent):
-        self.setButtonSymbols(self.UpDownArrows)
-        return super().leaveEvent(event)
-
-
 class Settings(QtCore.QObject):
     loaded = QtCore.Signal()
 
@@ -531,32 +512,6 @@ class Settings(QtCore.QObject):
 
         with open(self._settings_path, 'w') as file_obj:
             json.dump(current, file_obj, indent=2, sort_keys=True)
-
-
-class FFMPegFinder(QtCore.QThread):
-    found = QtCore.Signal(str)
-
-    def __init__(self, parent):
-        super().__init__(parent)
-
-    def run(self):
-        found = _find_ffmpeg()
-        if found:
-            self.found.emit(found)
-
-
-def _find_ffmpeg():
-    import subprocess
-
-    nfo = subprocess.STARTUPINFO()
-    nfo.wShowWindow = subprocess.SW_HIDE
-    nfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-    try:
-        found = subprocess.check_output(['where', 'ffmpeg'], startupinfo=nfo)
-        return found.decode().strip()
-    except subprocess.CalledProcessError:
-        return ''
 
 
 def show():
