@@ -36,6 +36,8 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.overlay = Overlay(self)
         self.overlay.cursor_change.connect(self.set_cursor)
 
+        # Just to remember: We can set the brush to nothing like this to have a
+        # completely transparent background. We'll need it for video then :)
         # self.setBackgroundBrush(QtGui.QBrush())
 
         QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
