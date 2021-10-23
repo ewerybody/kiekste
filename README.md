@@ -1,4 +1,4 @@
-# shoppy
+# kiekste
 Experimental Screenshot Tool with Qt for Python
 
 so far... 
