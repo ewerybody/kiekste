@@ -250,11 +250,7 @@ class Overlay(QtCore.QObject):
         self.rx.setBrush(QtCore.Qt.transparent)
         self.rx.setPen(QtGui.QPen(QtCore.Qt.white, 1))
 
-        self._ticks = 0
-        self._delta = 0
-        self._timer = QtCore.QTimer(parent)
-        self._timer.timeout.connect(self._update)
-        self._timer.setInterval(DIM_INTERVAL)
+        self._fader = _ColorFader(self)
 
     @property
     def rect(self):
@@ -354,39 +350,52 @@ class Overlay(QtCore.QObject):
         return rect
 
     def dim(self):
-        if not self._rect_set:
-            self.set_rect(QtCore.QRectF())
-        self._anim_rects = self.rects
-        self._ticks = DIM_DURATION / DIM_INTERVAL
-        self._delta = DIM_OPACITY / self._ticks
-        self._timer.start()
+        self._fader.fade(self.rects, self.dim_color, DIM_OPACITY)
 
     def undim(self):
-        self._anim_rects = self.rects
-        self.dim_color.setAlpha(DIM_OPACITY)
+        self._fader.finished.connect(self.finished.emit)
+        self._fader.fade(self.rects, self.dim_color, 0)
+
+    def flash(self):
+        self.color = QtGui.QColor(QtCore.Qt.white)
+        self.color.setAlpha(100)
+        self._fader.fade([self.rx], self.color, 0)
+
+
+class _ColorFader(QtCore.QObject):
+    finished = QtCore.Signal()
+
+    def __init__(self, parent):
+        super().__init__()
+        self._ticks = 0
+        self._delta = 0
+        self._timer = QtCore.QTimer(parent)
+        self._timer.timeout.connect(self._update)
+        self._timer.setInterval(DIM_INTERVAL)
+        self._color = None # type: QtGui.QColor | None
+        self._objs = []
+
+    def fade(self, objs, color, target_opacity):
+        self._color = color
+        self._objs[:] = objs
         self._ticks = DIM_DURATION / DIM_INTERVAL
-        self._delta = -DIM_OPACITY / self._ticks
+        self._delta = (target_opacity - color.alpha()) / self._ticks
         self._timer.start()
 
     def _update(self):
+        if self._color is None:
+            return
+
         self._ticks -= 1
         if self._ticks < 0:
             self._timer.stop()
             self.finished.emit()
             return
 
-        new_value = self.dim_color.alpha() + self._delta
-        self.dim_color.setAlpha(max(new_value, 0))
-        for r in self._anim_rects:
-            r.setBrush(self.dim_color)
-
-    def flash(self):
-        self._anim_rects = [self.rx]
-        self.color = QtGui.QColor(QtCore.Qt.white)
-        self._ticks = DIM_DURATION / DIM_INTERVAL
-        self.color.setAlpha(100)
-        self._delta = -DIM_OPACITY / self._ticks
-        self._timer.start()
+        new_value = self._color.alpha() + self._delta
+        self._color.setAlpha(max(new_value, 0))
+        for obj in self._objs:
+            obj.setBrush(self._color)
 
 
 class ToolBox(QtWidgets.QWidget):
