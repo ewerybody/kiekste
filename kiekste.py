@@ -25,13 +25,6 @@ cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
 class Kiekste(QtWidgets.QGraphicsView):
     def __init__(self):
         super().__init__()
-
-        self._dragging = False
-        self._cursor_pos = QtGui.QCursor.pos()
-        self._dragtangle = QtCore.QRect()
-        self._panning = False
-        self._pan_point = None
-
         self._setup_ui()
         self.overlay = Overlay(self)
         self.overlay.cursor_change.connect(self.set_cursor)
@@ -47,7 +40,7 @@ class Kiekste(QtWidgets.QGraphicsView):
             QShortcut(QtGui.QKeySequence(seq), self, self.clip)
 
         for side in cursor_keys:
-            QShortcut(QtGui.QKeySequence.fromString(side), self, self.shift_view)
+            QShortcut(QtGui.QKeySequence.fromString(side), self, self.shift_rect)
 
         self.toolbox = None  # type: None | ToolBox
         self.settings = Settings()
@@ -63,46 +56,26 @@ class Kiekste(QtWidgets.QGraphicsView):
         self._build_toolbox()
         return super().showEvent(event)
 
-    def shift_view(self):
-        trigger_key = self.sender().key().toString()
-        for side, shift in cursor_keys.items():
-            if trigger_key == side:
-                self._dragtangle.moveTo(
-                    self._dragtangle.x() + shift[0], self._dragtangle.y() + shift[1]
-                )
-                self._set_rectangle(self._dragtangle)
-                return
+    def shift_rect(self):
+        short_cut = self.sender()  # type: QShortcut
+        if not isinstance(short_cut, QShortcut):
+            return
+        trigger_key = short_cut.key().toString()
+        shift = cursor_keys.get(trigger_key)
+        if shift:
+            self.overlay.shift_rect(*shift)
 
-    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
-        self.overlay.cursor_move(event.pos())
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        self.overlay.wheel_scroll(event.delta())
+        return super().wheelEvent(event)
 
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.buttons() & QtCore.Qt.LeftButton:
             self.overlay.mouse_press(True)
+        return super().mousePressEvent(event)
 
-            if not self._dragging and not self._panning:
-                self._dragtangle.setTopLeft(event.pos())
-                self._dragging = True
-            else:
-                if self._panning:
-                    if self._pan_point is None:
-                        self._pan_point = event.pos() - self._dragtangle.center()
-                        self.set_cursor(QtCore.Qt.ClosedHandCursor)
-
-                    self._dragtangle.moveCenter(event.pos() - self._pan_point)
-                else:
-                    self._dragtangle.setBottomRight(event.pos())
-                self._set_rectangle(self._dragtangle)
-        else:
-            if self._dragtangle.contains(event.pos()):
-                if self._panning:
-                    return
-                self._panning = True
-                self.set_cursor(QtCore.Qt.OpenHandCursor)
-            else:
-                self._pan_off()
-                self.set_cursor(QtCore.Qt.CrossCursor)
-
-        return super().mouseMoveEvent(event)
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        self.overlay.cursor_move(QtCore.QPointF(event.pos()))
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         if event.key() == QtCore.Qt.Key_Space:
@@ -110,37 +83,14 @@ class Kiekste(QtWidgets.QGraphicsView):
                 return
             self.overlay.space_press(True)
 
-        if self._dragging and not self._panning and event.key() == QtCore.Qt.Key_Space:
-            if event.isAutoRepeat():
-                return
-            self._panning = True
-            self._pan_point = QtGui.QCursor.pos() - self._dragtangle.center()
-            self.set_cursor(QtCore.Qt.ClosedHandCursor)
-            return
-        return super().keyPressEvent(event)
-
     def keyReleaseEvent(self, event: QtGui.QKeyEvent) -> None:
-        if self._panning and event.key() == QtCore.Qt.Key_Space:
+        if event.key() == QtCore.Qt.Key_Space:
             if event.isAutoRepeat():
                 return
-            self._pan_off()
-            self.set_cursor(QtCore.Qt.CrossCursor)
-            return
-        return super().keyReleaseEvent(event)
+            self.overlay.space_press(False)
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
         self.overlay.mouse_press(False)
-
-        if self._dragging:
-            self._dragging = False
-        if self._dragtangle.contains(event.pos()):
-            self.set_cursor(QtCore.Qt.OpenHandCursor)
-        self._pan_off()
-        return super().mouseReleaseEvent(event)
-
-    def _pan_off(self):
-        self._panning = False
-        self._pan_point = None
 
     def escape(self):
         self.overlay.finished.connect(self.close)
@@ -183,12 +133,14 @@ class Kiekste(QtWidgets.QGraphicsView):
 
     def _build_toolbox(self):
         self.toolbox = ToolBox(self)
+
         self.toolbox.close_requested.connect(self.escape)
         self.toolbox.save.connect(self.save_shot)
         self.toolbox.clip.connect(self.clip)
         self.toolbox.coords_changed.connect(self.overlay.set_rect)
         self.toolbox.mode_switched.connect(self._change_mode)
         self.toolbox.pointer_toggled.connect(self.toggle_pointer)
+        self.overlay.rect_change.connect(self.toolbox.set_spinners)
         self.activateWindow()
 
     def set_cursor(self, shape: QtCore.Qt.CursorShape):
@@ -229,7 +181,7 @@ class Kiekste(QtWidgets.QGraphicsView):
             del self.settings.last_rectangles[: -self.settings.max_rectangles]
         self.settings._save()
 
-    def _set_rectangle(self, rect: QtCore.QRect):
+    def _set_rectangle(self, rect: QtCore.QRectF):
         if self.toolbox is None:
             return
         rect = rect.normalized()
@@ -257,27 +209,40 @@ class Kiekste(QtWidgets.QGraphicsView):
 class Overlay(QtCore.QObject):
     finished = QtCore.Signal()
     cursor_change = QtCore.Signal(QtCore.Qt.CursorShape)
+    rect_change = QtCore.Signal(QtCore.QRectF)
 
     def __init__(self, parent: Kiekste):
         super().__init__(parent)
         self._parent = parent
         self._lmouse = False
+        self._space = False
+        self._dragging = None
+        self._panning = False
+        self._anim_rects = []
+        self._rect_set = False
+        self._pos = QtCore.QPointF()
 
         self.geo = parent.geometry()
-        self.r1 = QtWidgets.QGraphicsRectItem()
-        self.r2 = QtWidgets.QGraphicsRectItem()
-        self.r3 = QtWidgets.QGraphicsRectItem()
-        self.r4 = QtWidgets.QGraphicsRectItem()
-        self.rects = ()
-        self._set_outer()
-        self.color.setAlpha(0)
-        scene = parent.scene()
+        # have some rectangles around the center one tlrb being: top left right bottom
+        self.rtl = QtWidgets.QGraphicsRectItem()
+        self.rt = QtWidgets.QGraphicsRectItem()
+        self.rtr = QtWidgets.QGraphicsRectItem()
+        self.rl = QtWidgets.QGraphicsRectItem()
+        self.rr = QtWidgets.QGraphicsRectItem()
+        self.rbl = QtWidgets.QGraphicsRectItem()
+        self.rb = QtWidgets.QGraphicsRectItem()
+        self.rbr = QtWidgets.QGraphicsRectItem()
+        self.rects = [self.rtl, self.rt, self.rtr, self.rl, self.rr, self.rbl, self.rb, self.rbr]
 
+        self.dim_color = QtGui.QColor(QtCore.Qt.black)
+        self.dim_color.setAlpha(0)
+        scene = parent.scene()
         for r in self.rects:
             scene.addItem(r)
-            r.setBrush(self.color)
+            r.setBrush(self.dim_color)
             r.setPen(QtGui.QPen(QtCore.Qt.transparent, 0))
 
+        # have a central rectangle
         self.rx = QtWidgets.QGraphicsRectItem()
         scene.addItem(self.rx)
         self.rx.setBrush(QtCore.Qt.transparent)
@@ -288,45 +253,118 @@ class Overlay(QtCore.QObject):
         self._timer = QtCore.QTimer(parent)
         self._timer.timeout.connect(self._update)
         self._timer.setInterval(DIM_INTERVAL)
-        self._rect_set = False
 
     @property
     def rect(self):
-        return
+        return self.rx.rect()
 
-    def cursor_move(self, pos: QtCore.QPoint):
-        pass
+    def shift_rect(self, vector: QtCore.QPointF, rect: QtCore.QRectF = None):
+        if rect is None:
+            rect = self.rx.rect()
+        center = rect.center()
+        rect.moveCenter(center + vector)
+        self._set_rect(rect)
+
+    def cursor_move(self, pos: QtCore.QPointF):
+        diff = QtCore.QPointF(pos) - self._pos
+        self._pos.setX(pos.x())
+        self._pos.setY(pos.y())
+
+        self._set_cursor()
+
+        if not self._lmouse:
+            return
+
+        if self._dragging is None and self.rx.isUnderMouse():
+            if not self._panning:
+                self._panning = True
+            self.shift_rect(diff)
+        else:
+            rect = self.rx.rect()
+            if self._dragging is None:
+                self._dragging = QtCore.QRectF(pos, QtCore.QPointF(0,0))
+            if self._space:
+                self.shift_rect(diff, self._dragging)
+            else:
+                self._dragging.setBottomRight(pos)
+                self._set_rect(self._dragging)
+
+    def _set_cursor(self):
+        if self.rx.isUnderMouse():
+            if self._lmouse:
+                self.cursor_change.emit(QtCore.Qt.ClosedHandCursor)
+            else:
+                self.cursor_change.emit(QtCore.Qt.OpenHandCursor)
+        else:
+            self.cursor_change.emit(QtCore.Qt.CrossCursor)
 
     def mouse_press(self, state):
         self._lmouse = state
+        print('self._lmouse: %s' % self._lmouse)
+        self._set_cursor()
+        if not state:
+            self._panning = False
+            self._dragging = None
 
     def space_press(self, state):
         self._space = state
+        print('self._space: %s' % self._space)
 
-    def set_rect(self, rect: QtCore.QRect):
+    def wheel_scroll(self, delta):
+        rect = self.rx.rect()
+        for r, value_func, rect_func in (
+            (self.rl, rect.x, rect.setX),
+            (self.rt, rect.y, rect.setY),
+            (self.rr, rect.right, rect.setRight),
+            (self.rb, rect.bottom, rect.setBottom),
+        ):
+            if not r.isUnderMouse():
+                continue
+            rect_func(value_func() + delta / 10.0)
+            self._set_rect(rect)
+            return rect
+
+    def set_rect(self, rect: QtCore.QRectF):
+        """Set the inner rectangle."""
         self._rect_set = True
-        geow, geoh = self.geo.width(), self.geo.height()
+        if not rect.isValid():
+            rect = rect.normalized()
         recw, rech = rect.width(), rect.height()
-        self.r1.setRect(0, 0, geow, rect.y())
-        self.r2.setRect(0, rect.y(), rect.x(), rech)
-        self.r3.setRect(rect.x() + recw, rect.y(), geow - recw - rect.x(), rech)
-        self.r4.setRect(0, rech + rect.y(), geow, geoh - rech - rect.y())
-        self.rx.setRect(rect)
+        wr = self.geo.right() - rect.right()
+        hb = self.geo.bottom() - rect.bottom()
 
-    def _set_outer(self):
-        self.rects = (self.r1, self.r2, self.r3, self.r4)
-        self.color = QtGui.QColor(QtCore.Qt.black)
+        self.rtl.setRect(0, 0, rect.x(), rect.y())
+        self.rt.setRect(rect.x(), 0, recw, rect.y())
+        self.rtr.setRect(rect.right(), 0, wr, rect.y())
+        self.rl.setRect(0, rect.y(), rect.x(), rech)
+        self.rr.setRect(rect.right(), rect.y(), wr, rech)
+        self.rbl.setRect(0, rect.bottom(), rect.x(), hb)
+        self.rb.setRect(rect.x(), rect.bottom(), recw, hb)
+        self.rbr.setRect(rect.right(), rect.bottom(), wr, hb)
+
+        self.rx.setRect(rect)
+        return rect
+
+    def _set_rect(self, rect: QtCore.QRectF):
+        """Set the inner rectangle and signal the change."""
+        self.rect_change.emit(rect)
+        self.set_rect(rect)
+        return rect
+
+    # def _set_outer(self):
+    #     self.rects = (self.r1, self.r2, self.r3, self.r4)
 
     def dim(self):
         if not self._rect_set:
-            self.set_rect(QtCore.QRect())
+            self.set_rect(QtCore.QRectF())
+        self._anim_rects = self.rects
         self._ticks = DIM_DURATION / DIM_INTERVAL
         self._delta = DIM_OPACITY / self._ticks
         self._timer.start()
 
     def undim(self):
-        self._set_outer()
-        self.color.setAlpha(DIM_OPACITY)
+        self._anim_rects = self.rects
+        self.dim_color.setAlpha(DIM_OPACITY)
         self._ticks = DIM_DURATION / DIM_INTERVAL
         self._delta = -DIM_OPACITY / self._ticks
         self._timer.start()
@@ -338,13 +376,13 @@ class Overlay(QtCore.QObject):
             self.finished.emit()
             return
 
-        new_value = self.color.alpha() + self._delta
-        self.color.setAlpha(max(new_value, 0))
-        for r in self.rects:
-            r.setBrush(self.color)
+        new_value = self.dim_color.alpha() + self._delta
+        self.dim_color.setAlpha(max(new_value, 0))
+        for r in self._anim_rects:
+            r.setBrush(self.dim_color)
 
     def flash(self):
-        self.rects = (self.rx,)
+        self._anim_rects = [self.rx]
         self.color = QtGui.QColor(QtCore.Qt.white)
         self._ticks = DIM_DURATION / DIM_INTERVAL
         self.color.setAlpha(100)
@@ -363,8 +401,8 @@ class ToolBox(QtWidgets.QWidget):
     def __init__(self, parent: Kiekste):
         super().__init__(parent)
         self._parent = parent
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        self.hlayout = QtWidgets.QHBoxLayout(self)
+        self.hlayout.setContentsMargins(5, 5, 5, 5)
 
         widgets._TbBtn(self, None)
         self.spinners = []
@@ -389,13 +427,12 @@ class ToolBox(QtWidgets.QWidget):
         self.setWindowOpacity(0.4)
 
     def _add_spinners(self):
-        layout = self.layout()
         last_rects = self._parent.settings.last_rectangles
         for i in range(4):
             spin = widgets._TbSpin(self)
             if last_rects:
                 spin.setValue(last_rects[-1][i])
-            layout.insertWidget(1 + i, spin)
+            self.hlayout.insertWidget(1 + i, spin)
             self.spinners.append(spin)
             spin.valueChanged.connect(self.on_spin)
         QtCore.QTimer(self).singleShot(5, self._center_box)
@@ -438,7 +475,7 @@ class ToolBox(QtWidgets.QWidget):
         coords.setRect(*(s.value() for s in self.spinners))
         self.coords_changed.emit(coords)
 
-    def set_spinners(self, rect: QtCore.QRect):
+    def set_spinners(self, rect: QtCore.QRectF):
         for value, spinbox in zip(rect.getRect(), self.spinners):
             spinbox.blockSignals(True)
             spinbox.setValue(value)
