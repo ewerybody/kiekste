@@ -149,9 +149,9 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.setCursor(cursor)
 
     def save_shot(self):
-        if not self._dragtangle:
+        rect = self.overlay.rect
+        if not rect:
             return
-
         file_path, file_type = QtWidgets.QFileDialog.getSaveFileName(
             self, NAME + ' Save Screenshot', self.settings.last_save_path or PATH, 'PNG (*.png)'
         )
@@ -159,19 +159,22 @@ class Kiekste(QtWidgets.QGraphicsView):
             return
 
         self.overlay.flash()
-        cutout = self.pixmap.copy(self._dragtangle.normalized())
+        cutout = self.pixmap.copy(rect)
         cutout.save(file_path)
         self.settings.last_save_path = os.path.dirname(file_path)
         self._save_rect()
 
     def clip(self):
+        rect = self.overlay.rect
+        if not rect:
+            return
         self.overlay.flash()
-        cutout = self.pixmap.copy(self._dragtangle.normalized())
+        cutout = self.pixmap.copy(rect)
         QtWidgets.QApplication.clipboard().setPixmap(cutout)
         self._save_rect()
 
     def _save_rect(self):
-        rect_list = list(self._dragtangle.getRect())
+        rect_list = list(self.overlay.rect.getRect())
         if rect_list in self.settings.last_rectangles:
             if self.settings.last_rectangles[-1] == rect_list:
                 return
@@ -181,17 +184,17 @@ class Kiekste(QtWidgets.QGraphicsView):
             del self.settings.last_rectangles[: -self.settings.max_rectangles]
         self.settings._save()
 
-    def _set_rectangle(self, rect: QtCore.QRectF):
+    def _set_rectangle(self, rect):
+        # type: (QtCore.QRectF | QtCore.QRect) -> None
         if self.toolbox is None:
             return
-        rect = rect.normalized()
         self.overlay.set_rect(rect)
         self.toolbox.set_spinners(rect)
 
     def _drag_last_tangle(self):
         if self.settings.last_rectangles:
-            self._dragtangle.setRect(*self.settings.last_rectangles[-1])
-            self._set_rectangle(self._dragtangle)
+            rect = QtCore.QRect(*self.settings.last_rectangles[-1])
+            self._set_rectangle(rect)
 
     def _found_video_tool(self):
         if self.toolbox is None:
@@ -218,7 +221,6 @@ class Overlay(QtCore.QObject):
         self._space = False
         self._dragging = None
         self._panning = False
-        self._anim_rects = []
         self._rect_set = False
         self._pos = QtCore.QPointF()
 
@@ -256,7 +258,7 @@ class Overlay(QtCore.QObject):
 
     @property
     def rect(self):
-        return self.rx.rect()
+        return self.rx.rect().toAlignedRect()
 
     def shift_rect(self, vector: QtCore.QPointF, rect: QtCore.QRectF = None):
         if rect is None:
@@ -280,7 +282,6 @@ class Overlay(QtCore.QObject):
                 self._panning = True
             self.shift_rect(diff)
         else:
-            rect = self.rx.rect()
             if self._dragging is None:
                 self._dragging = QtCore.QRectF(pos, QtCore.QPointF(0,0))
             if self._space:
@@ -324,7 +325,8 @@ class Overlay(QtCore.QObject):
             self._set_rect(rect)
             return rect
 
-    def set_rect(self, rect: QtCore.QRectF):
+    def set_rect(self, rect):
+        # type: (QtCore.QRectF | QtCore.QRect) -> QtCore.QRectF | QtCore.QRect
         """Set the inner rectangle."""
         self._rect_set = True
         if not rect.isValid():
@@ -350,9 +352,6 @@ class Overlay(QtCore.QObject):
         self.rect_change.emit(rect)
         self.set_rect(rect)
         return rect
-
-    # def _set_outer(self):
-    #     self.rects = (self.r1, self.r2, self.r3, self.r4)
 
     def dim(self):
         if not self._rect_set:
@@ -475,7 +474,9 @@ class ToolBox(QtWidgets.QWidget):
         coords.setRect(*(s.value() for s in self.spinners))
         self.coords_changed.emit(coords)
 
-    def set_spinners(self, rect: QtCore.QRectF):
+    def set_spinners(self, rect):
+        # type: (QtCore.QRectF | QtCore.QRect) -> None
+        rect = rect.normalized()
         for value, spinbox in zip(rect.getRect(), self.spinners):
             spinbox.blockSignals(True)
             spinbox.setValue(value)
