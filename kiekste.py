@@ -1,5 +1,7 @@
 import os
+import json
 import logging
+import time
 
 import image_stub
 import video_man
@@ -44,7 +46,6 @@ class Kiekste(QtWidgets.QGraphicsView):
 
         self.toolbox = None  # type: None | ToolBox
         self.settings = Settings()
-        self.settings.loaded.connect(self._drag_last_tangle)
         self.videoman = video_man.VideoMan(self)
         self.videoman.video_found.connect(self._found_video_tool)
 
@@ -54,6 +55,7 @@ class Kiekste(QtWidgets.QGraphicsView):
     def showEvent(self, event):
         self.overlay.dim()
         self._build_toolbox()
+        self._draw_last_tangle()
         return super().showEvent(event)
 
     def shift_rect(self):
@@ -78,15 +80,15 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.overlay.cursor_move(QtCore.QPointF(event.pos()))
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        if event.isAutoRepeat():
+            return
         if event.key() == QtCore.Qt.Key_Space:
-            if event.isAutoRepeat():
-                return
             self.overlay.space_press(True)
 
     def keyReleaseEvent(self, event: QtGui.QKeyEvent) -> None:
+        if event.isAutoRepeat():
+            return
         if event.key() == QtCore.Qt.Key_Space:
-            if event.isAutoRepeat():
-                return
             self.overlay.space_press(False)
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
@@ -184,17 +186,13 @@ class Kiekste(QtWidgets.QGraphicsView):
             del self.settings.last_rectangles[: -self.settings.max_rectangles]
         self.settings._save()
 
-    def _set_rectangle(self, rect):
-        # type: (QtCore.QRectF | QtCore.QRect) -> None
-        if self.toolbox is None:
-            return
-        self.overlay.set_rect(rect)
-        self.toolbox.set_spinners(rect)
-
-    def _drag_last_tangle(self):
+    def _draw_last_tangle(self):
         if self.settings.last_rectangles:
             rect = QtCore.QRect(*self.settings.last_rectangles[-1])
-            self._set_rectangle(rect)
+            self.overlay.set_rect(rect)
+            if self.toolbox is None:
+                return
+            self.toolbox.set_spinners(rect)
 
     def _found_video_tool(self):
         if self.toolbox is None:
@@ -510,8 +508,6 @@ class ToolBox(QtWidgets.QWidget):
 
 
 class Settings(QtCore.QObject):
-    loaded = QtCore.Signal()
-
     def __init__(self):
         super(Settings, self).__init__()
         self.last_save_path = ''
@@ -521,14 +517,13 @@ class Settings(QtCore.QObject):
 
         self._settings_file = NAME.lower() + '.json'
         self._settings_path = os.path.join(PATH, self._settings_file)
-        QtCore.QTimer(self).singleShot(500, self._load)
+        self._load()
 
     def _load(self):
         for key, value in self._get_json().items():
             if key not in self.__dict__:
                 log.warning(f'Key {key} not yet listed in Settings obj!1')
             self.__dict__[key] = value
-        self.loaded.emit()
 
     def _get_json(self):
         import json
@@ -539,8 +534,6 @@ class Settings(QtCore.QObject):
         return {}
 
     def _save(self):
-        import json
-
         current = self._get_json()
         do_write = False
         for name, value in self.__dict__.items():
