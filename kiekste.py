@@ -31,9 +31,10 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.overlay = Overlay(self)
         self.overlay.cursor_change.connect(self.set_cursor)
 
-        # Just to remember: We can set the brush to nothing like this to have a
-        # completely transparent background. We'll need it for video then :)
-        # self.setBackgroundBrush(QtGui.QBrush())
+        self.toolbox = None  # type: None | ToolBox
+        self.settings = Settings()
+        self.videoman = video_man.VideoMan(self)
+        self.videoman.video_found.connect(self._found_video_tool)
 
         QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
         for seq in QtCore.Qt.Key_S, QtCore.Qt.CTRL + QtCore.Qt.Key_S:
@@ -41,13 +42,11 @@ class Kiekste(QtWidgets.QGraphicsView):
         for seq in QtCore.Qt.Key_C, QtCore.Qt.CTRL + QtCore.Qt.Key_C:
             QShortcut(QtGui.QKeySequence(seq), self, self.clip)
 
+        for seq in (QtCore.Qt.ALT + QtCore.Qt.Key_V, ):
+            QShortcut(QtGui.QKeySequence(seq), self, self.video_capture)
+
         for side in cursor_keys:
             QShortcut(QtGui.QKeySequence.fromString(side), self, self.shift_rect)
-
-        self.toolbox = None  # type: None | ToolBox
-        self.settings = Settings()
-        self.videoman = video_man.VideoMan(self)
-        self.videoman.video_found.connect(self._found_video_tool)
 
         self.set_cursor(QtCore.Qt.CrossCursor)
         self.show()
@@ -108,6 +107,9 @@ class Kiekste(QtWidgets.QGraphicsView):
         geo = screen.geometry()
         self.pixmap = screen.grabWindow(0)
         self.setBackgroundBrush(QtGui.QBrush(self.pixmap))
+        # Just to remember: We can set the brush to nothing like this to have a
+        # completely transparent background. We'll need it for video then :)
+        # self.setBackgroundBrush(QtGui.QBrush())
 
         scene = QtWidgets.QGraphicsScene(0, 0, geo.width(), geo.height())
         self.setScene(scene)
@@ -116,7 +118,9 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.setRenderHints(QtGui.QPainter.Antialiasing | QtGui.QPainter.SmoothPixmapTransform)
 
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
-        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
+        self.setWindowFlags(
+            QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint
+        )
         self.setStyleSheet('QGraphicsView {background:transparent;}')
 
         # Because there is a white border that I can't get rid of,
@@ -206,6 +210,17 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.settings.draw_pointer = state
         self.settings._save()
 
+    def video_capture(self):
+        self.overlay.undim()
+        video_widget = VideoWidget(self, self.videoman)
+        widget_geo = video_widget.geometry()
+        widget_geo.setX(self.overlay.rect.x())
+        widget_geo.setY(self.overlay.rect.bottom() + 10)
+        video_widget.show()
+        video_widget.setGeometry(widget_geo)
+        self.setBackgroundBrush(QtGui.QBrush())
+        self.videoman.capture(self.overlay.rect)
+
 
 class Overlay(QtCore.QObject):
     finished = QtCore.Signal()
@@ -246,9 +261,15 @@ class Overlay(QtCore.QObject):
         self.rx = QtWidgets.QGraphicsRectItem()
         scene.addItem(self.rx)
         self.rx.setBrush(QtCore.Qt.transparent)
-        self.rx.setPen(QtGui.QPen(QtCore.Qt.white, 1))
+        self.rx.setPen(QtGui.QPen(QtCore.Qt.white, 0.5))
 
         self._fader = _ColorFader(self)
+
+        pointer = QtWidgets.QGraphicsPixmapItem(IMG.pointer.pixmap(64))
+        # pointer.move
+        pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsMovable, True)
+        pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsSelectable, True)
+        scene.addItem(pointer)
 
     @property
     def rect(self):
@@ -277,7 +298,7 @@ class Overlay(QtCore.QObject):
             self.shift_rect(diff)
         else:
             if self._dragging is None:
-                self._dragging = QtCore.QRectF(pos, QtCore.QPointF(0,0))
+                self._dragging = QtCore.QRectF(pos, QtCore.QPointF(0, 0))
             if self._space:
                 self.shift_rect(diff, self._dragging)
             else:
@@ -370,7 +391,7 @@ class _ColorFader(QtCore.QObject):
         self._timer = QtCore.QTimer(parent)
         self._timer.timeout.connect(self._update)
         self._timer.setInterval(DIM_INTERVAL)
-        self._color = None # type: QtGui.QColor | None
+        self._color = None  # type: QtGui.QColor | None
         self._objs = []
 
     def fade(self, objs, color, target_opacity):
@@ -394,6 +415,33 @@ class _ColorFader(QtCore.QObject):
         self._color.setAlpha(max(new_value, 0))
         for obj in self._objs:
             obj.setBrush(self._color)
+
+
+class VideoWidget(QtWidgets.QWidget):
+    def __init__(self, parent, videoman):
+        super().__init__(parent)
+        self.videoman = videoman
+        self.hlayout = QtWidgets.QHBoxLayout(self)
+        self.hlayout.setContentsMargins(5, 5, 5, 5)
+
+        # QtWidgets.QLCDNumber
+        self._t0 = time.time()
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._set_label)
+        self._timer.setInterval(100)
+        self.label = QtWidgets.QLabel()
+        self.hlayout.addWidget(self.label)
+        widgets._TbBtn(self, IMG.x, self._stop)
+        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
+        self._timer.start()
+
+    def _stop(self):
+        self.videoman.stop()
+        self._timer.stop()
+        self.deleteLater()
+
+    def _set_label(self):
+        self.label.setText(str(time.time() - self._t0))
 
 
 class ToolBox(QtWidgets.QWidget):
@@ -514,6 +562,8 @@ class Settings(QtCore.QObject):
         self.last_rectangles = []
         self.max_rectangles = 12
         self.draw_pointer = True
+        self.video_fps = 10
+        self.video_quality = 5000
 
         self._settings_file = NAME.lower() + '.json'
         self._settings_path = os.path.join(PATH, self._settings_file)
