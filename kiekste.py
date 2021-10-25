@@ -211,6 +211,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.settings._save()
 
     def video_capture(self):
+        self._save_rect()
         self.overlay.undim()
         video_widget = VideoWidget(self, self.videoman)
         widget_geo = video_widget.geometry()
@@ -220,6 +221,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         video_widget.setGeometry(widget_geo)
         self.setBackgroundBrush(QtGui.QBrush())
         self.videoman.capture(self.overlay.rect)
+        self.videoman.capture_stopped.connect(self.overlay.dim)
 
 
 class Overlay(QtCore.QObject):
