@@ -1,7 +1,4 @@
 import os
-import time
-from io import StringIO
-
 from pyside import QtCore
 
 
@@ -17,6 +14,7 @@ class VideoMan(QtCore.QObject):
     def __init__(self, parent):
         super().__init__(parent)
         self.path = ''
+        self.capturing = False
         self.thread = None  # type: _CaptureThread | None
         QtCore.QTimer(self).singleShot(500, self._find_ffmpeg)
 
@@ -42,34 +40,40 @@ class VideoMan(QtCore.QObject):
 
         settings = self.parent().settings
         capture_settings = {
-            'x': rect.x(), 'y': rect.y(),
-            'w': rect.width(), 'h': rect.height(),
+            'x': rect.x(),
+            'y': rect.y(),
+            'w': rect.width(),
+            'h': rect.height(),
             'fps': settings.video_fps,
             'quality': settings.video_quality,
             'pointer': int(settings.draw_pointer),
             'out_path': out_file,
         }
 
-        # _run_video_process(self.path, capture_settings)
-
+        self.capturing = True
         self.thread = _CaptureThread(self, self.path, capture_settings)
+        self.thread.stopped.connect(self.on_stopped)
         self.thread.finished.connect(self.thread.deleteLater)
-        self.thread.finished.connect(self._stopped)
         self.thread.start()
 
     def stop(self):
         if self.thread is None:
             return
-        self.thread.stop()
+        self.thread.requestInterruption()
 
-    def _stopped(self):
-        self.capture_stopped.emit()
-        print('self.thread finished: %s' % self.thread)
-        self.thread
+    def on_stopped(self):
+        try:
+            print('self.thread stopped: %s\n' % self.thread)
+            self.capturing = False
+        except KeyboardInterrupt:
+            print('KeyboardInterrupt catched!')
+            pass
+        QtCore.QTimer(self).singleShot(250, self.capture_stopped.emit)
 
 
 class _CaptureThread(QtCore.QThread):
     progress = QtCore.Signal(dict)
+    stopped = QtCore.Signal()
 
     def __init__(self, parent, path, settings):
         super().__init__(parent)
@@ -80,17 +84,8 @@ class _CaptureThread(QtCore.QThread):
         # how to deal with output? Do we need it?
         # subprocess needs file like objs to pipe to. These also need `.fileno`
         # so StringIO doesn't do! :/ We could open real files to pipe to:
-        # self._strout_file = os.path.join(TMP_PATH, '_tmpout')
-        # self._strerr_file = os.path.join(TMP_PATH, '_tmperr')
-
-    def stop(self):
-        self.requestInterruption()
-
-    def _stdout(self, things):
-        print('_stdout: %s' % things)
-
-    def _stderr(self, things):
-        print('_stdout: %s' % things)
+        self._strout_file = os.path.join(TMP_PATH, '_tmpout')
+        self._strerr_file = os.path.join(TMP_PATH, '_tmperr')
 
     def run(self):
         # I'd love to use `QProcess` right away but had massive problems so far.
@@ -101,59 +96,43 @@ class _CaptureThread(QtCore.QThread):
         args_list = [self.path]
         args_list.extend(ARGS.format_map(self.settings).split())
         args_list.append(self.settings['out_path'])
-        print('running _CaptureThread with args:\n%s' % args_list)
 
-        try:
-            process = subprocess.Popen(args_list)
+        tmp_stdout_fob = open(self._strout_file, 'w')
+        tmp_stderr_fob = open(self._strerr_file, 'w')
 
-            while True:
-                if self.isInterruptionRequested():
-                    process.send_signal(signal.CTRL_C_EVENT)
-                    break
+
+        process = subprocess.Popen(
+            args_list,
+            shell=True,
+            stdout=tmp_stdout_fob,
+            stderr=tmp_stderr_fob,
+        )
+
+        while True:
+            if self.isInterruptionRequested():
+                process.send_signal(signal.CTRL_C_EVENT)
                 self.msleep(100)
+                self.stopped.emit()
+                break
 
-            print('process: %s' % process)
-        except KeyboardInterrupt:
-            print('process interrupted')
-            pass
+            self.msleep(100)
 
+        # sticking around as long as process would be running ...
+        cmd = subprocess.list2cmdline(
+            ['wmic.exe', 'process', 'where', f'ProcessID={process.pid}', 'get', 'ProcessID']
+        )
+        while True:
+            output = subprocess.check_output(
+                cmd, shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE
+            ).strip()
+            if not output:
+                print('process is gone!')
+                break
+            print('output: %s' % output)
+            self.msleep(200)
 
-class _OutputPipe(StringIO):
-    def __init__(self, func):
-        self._write_to = func
-
-    def write(self, msg):
-        self._write_to(msg)
-
-    def fileno(self):
-        return 1337
-
-
-def _run_video_process(path, settings):
-    import subprocess
-
-    args_list = [path]
-    args_list.extend(ARGS.format_map(settings).split())
-    args_list.append(settings['out_path'])
-    print('args: %s' % args_list)
-
-    process = subprocess.Popen(args_list)
-    print('process: %s' % process)
-    process
-
-    # print('things: %s' % str(things))
-    while True:
-        # if self.isInterruptionRequested():
-        #     process.close()
-        output = process.readAll()
-        if output:
-            print('process output: %s' % output)
-        error = process.errorString()
-        if error:
-            print('process error: %s' % error)
-        self.msleep(100)
-
-    time.sleep(0.1)
+        tmp_stdout_fob.close()
+        tmp_stderr_fob.close()
 
 
 class _FFMPegFinder(QtCore.QThread):
