@@ -53,8 +53,9 @@ class Kiekste(QtWidgets.QGraphicsView):
 
     def showEvent(self, event):
         self.overlay.dim()
-        self._build_toolbox()
-        self._draw_last_tangle()
+        if self.toolbox is None:
+            self._build_toolbox()
+            self._draw_last_tangle()
         return super().showEvent(event)
 
     def shift_rect(self):
@@ -97,16 +98,21 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.overlay.finished.connect(self.close)
         self.overlay.undim()
 
+    def set_screenshot(self):
+        screen = QtGui.QGuiApplication.primaryScreen()
+        geo = screen.geometry()
+        self.pixmap = screen.grabWindow(0)
+        self.setBackgroundBrush(QtGui.QBrush(self.pixmap))
+        return screen, geo
+
     def _setup_ui(self):
         self.setWindowTitle(NAME)
         self.setMouseTracking(True)
         self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
 
-        screen = QtGui.QGuiApplication.primaryScreen()
-        geo = screen.geometry()
-        self.pixmap = screen.grabWindow(0)
-        self.setBackgroundBrush(QtGui.QBrush(self.pixmap))
+        screen, geo = self.set_screenshot()
+
         # Just to remember: We can set the brush to nothing like this to have a
         # completely transparent background. We'll need it for video then :)
         # self.setBackgroundBrush(QtGui.QBrush())
@@ -211,17 +217,25 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.settings._save()
 
     def video_capture(self):
-        self._save_rect()
-        self.overlay.undim()
-        video_widget = VideoWidget(self, self.videoman)
-        widget_geo = video_widget.geometry()
-        widget_geo.setX(self.overlay.rect.x())
-        widget_geo.setY(self.overlay.rect.bottom() + 10)
-        video_widget.show()
-        video_widget.setGeometry(widget_geo)
-        self.setBackgroundBrush(QtGui.QBrush())
-        self.videoman.capture(self.overlay.rect)
-        self.videoman.capture_stopped.connect(self.overlay.dim)
+        if not self.videoman.capturing:
+            self._save_rect()
+            self.overlay.undim()
+            self.video_widget = VideoWidget(self, self.videoman)
+            widget_geo = self.video_widget.geometry()
+            widget_geo.setX(self.overlay.rect.x())
+            widget_geo.setY(self.overlay.rect.bottom() + 10)
+            self.video_widget.show()
+            self.video_widget.setGeometry(widget_geo)
+            self.setBackgroundBrush(QtGui.QBrush())
+            self.videoman.capture(self.overlay.rect)
+            self.videoman.capture_stopped.connect(self._on_capture_stopped)
+        else:
+            self.video_widget.stop()
+
+    def _on_capture_stopped(self):
+        self.hide()
+        self.set_screenshot()
+        self.show()
 
 
 class Overlay(QtCore.QObject):
@@ -318,7 +332,6 @@ class Overlay(QtCore.QObject):
 
     def mouse_press(self, state):
         self._lmouse = state
-        print('self._lmouse: %s' % self._lmouse)
         self._set_cursor()
         if not state:
             self._panning = False
@@ -433,11 +446,11 @@ class VideoWidget(QtWidgets.QWidget):
         self._timer.setInterval(100)
         self.label = QtWidgets.QLabel()
         self.hlayout.addWidget(self.label)
-        widgets._TbBtn(self, IMG.x, self._stop)
+        widgets._TbBtn(self, IMG.x, self.stop)
         self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
         self._timer.start()
 
-    def _stop(self):
+    def stop(self):
         self.videoman.stop()
         self._timer.stop()
         self.deleteLater()
