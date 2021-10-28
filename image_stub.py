@@ -71,3 +71,5 @@ class ImageStub:
                 return QtGui.QIcon(path)
             log.error('No such file: {path}')
         return QtGui.QIcon()
+
+IMG = ImageStub()

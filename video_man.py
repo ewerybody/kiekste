@@ -1,7 +1,11 @@
 import os
-from pyside import QtCore
+import time
+from pyside import QtCore, QtWidgets
 
+import image_stub
+import widgets
 
+IMG = image_stub.IMG
 ARGS = '-f gdigrab -draw_mouse {pointer} -framerate {fps} -offset_x {x} -offset_y {y} -video_size {w}x{h} -show_region 0 -i desktop -b:v {quality}k'
 TMP_NAME = '_kiekste_tmp'
 TMP_PATH = os.path.join(os.getenv('TEMP', ''), TMP_NAME)
@@ -145,6 +149,33 @@ class _FFMPegFinder(QtCore.QThread):
         found = _find_ffmpeg()
         if found:
             self.found.emit(found)
+
+
+class VideoWidget(QtWidgets.QWidget):
+    def __init__(self, parent, videoman):
+        super().__init__(parent)
+        self.videoman = videoman
+        self.hlayout = QtWidgets.QHBoxLayout(self)
+        self.hlayout.setContentsMargins(5, 5, 5, 5)
+
+        # QtWidgets.QLCDNumber
+        self._t0 = time.time()
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._set_label)
+        self._timer.setInterval(100)
+        self.label = QtWidgets.QLabel()
+        self.hlayout.addWidget(self.label)
+        widgets._TbBtn(self, IMG.x, self.stop)
+        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
+        self._timer.start()
+
+    def stop(self):
+        self.videoman.stop()
+        self._timer.stop()
+        self.deleteLater()
+
+    def _set_label(self):
+        self.label.setText(str(time.time() - self._t0))
 
 
 def _find_ffmpeg():

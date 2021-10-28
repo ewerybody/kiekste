@@ -18,7 +18,7 @@ DIM_DURATION = 200
 DIM_INTERVAL = 20
 MODE_CAM = 'Image'
 MODE_VID = 'Video'
-IMG = image_stub.ImageStub()
+IMG = image_stub.IMG
 
 
 cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
@@ -218,7 +218,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         if not self.videoman.capturing:
             self._save_rect()
             self.overlay.undim()
-            self.video_widget = VideoWidget(self, self.videoman)
+            self.video_widget = video_man.VideoWidget(self, self.videoman)
             widget_geo = self.video_widget.geometry()
             widget_geo.setX(self.overlay.rect.x())
             widget_geo.setY(self.overlay.rect.bottom() + 10)
@@ -429,33 +429,6 @@ class _ColorFader(QtCore.QObject):
         self._color.setAlpha(max(new_value, 0))
         for obj in self._objs:
             obj.setBrush(self._color)
-
-
-class VideoWidget(QtWidgets.QWidget):
-    def __init__(self, parent, videoman):
-        super().__init__(parent)
-        self.videoman = videoman
-        self.hlayout = QtWidgets.QHBoxLayout(self)
-        self.hlayout.setContentsMargins(5, 5, 5, 5)
-
-        # QtWidgets.QLCDNumber
-        self._t0 = time.time()
-        self._timer = QtCore.QTimer(self)
-        self._timer.timeout.connect(self._set_label)
-        self._timer.setInterval(100)
-        self.label = QtWidgets.QLabel()
-        self.hlayout.addWidget(self.label)
-        widgets._TbBtn(self, IMG.x, self.stop)
-        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint)
-        self._timer.start()
-
-    def stop(self):
-        self.videoman.stop()
-        self._timer.stop()
-        self.deleteLater()
-
-    def _set_label(self):
-        self.label.setText(str(time.time() - self._t0))
 
 
 class ToolBox(QtWidgets.QWidget):
