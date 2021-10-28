@@ -27,12 +27,13 @@ cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
 class Kiekste(QtWidgets.QGraphicsView):
     def __init__(self):
         super().__init__()
+        self.settings = Settings()
         self._setup_ui()
+        self._cursor_pos = None
         self.overlay = Overlay(self)
         self.overlay.cursor_change.connect(self.set_cursor)
 
         self.toolbox = None  # type: None | ToolBox
-        self.settings = Settings()
         self.videoman = video_man.VideoMan(self)
         self.videoman.video_found.connect(self._found_video_tool)
 
@@ -101,6 +102,7 @@ class Kiekste(QtWidgets.QGraphicsView):
     def set_screenshot(self):
         screen = QtGui.QGuiApplication.primaryScreen()
         geo = screen.geometry()
+        self._cursor_pos = self.cursor().pos()
         self.pixmap = screen.grabWindow(0)
         self.setBackgroundBrush(QtGui.QBrush(self.pixmap))
         return screen, geo
@@ -112,11 +114,6 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
 
         screen, geo = self.set_screenshot()
-
-        # Just to remember: We can set the brush to nothing like this to have a
-        # completely transparent background. We'll need it for video then :)
-        # self.setBackgroundBrush(QtGui.QBrush())
-
         scene = QtWidgets.QGraphicsScene(0, 0, geo.width(), geo.height())
         self.setScene(scene)
         self.setViewportUpdateMode(QtWidgets.QGraphicsView.BoundingRectViewportUpdate)
@@ -157,8 +154,9 @@ class Kiekste(QtWidgets.QGraphicsView):
 
     def set_cursor(self, shape: QtCore.Qt.CursorShape):
         cursor = self.cursor()
-        cursor.setShape(shape)
-        self.setCursor(cursor)
+        if cursor != shape:
+            cursor.setShape(shape)
+            self.setCursor(cursor)
 
     def save_shot(self):
         rect = self.overlay.rect
@@ -281,11 +279,13 @@ class Overlay(QtCore.QObject):
 
         self._fader = _ColorFader(self)
 
-        pointer = QtWidgets.QGraphicsPixmapItem(IMG.pointer.pixmap(64))
+        if parent.settings.draw_pointer:
+            pointer = QtWidgets.QGraphicsPixmapItem(IMG.pointer_black.pixmap(64))
+            pointer.setPos(parent.cursor().pos())
+            scene.addItem(pointer)
         # pointer.move
-        pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsMovable, True)
-        pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsSelectable, True)
-        scene.addItem(pointer)
+        # pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsMovable, True)
+        # pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsSelectable, True)
 
     @property
     def rect(self):
@@ -339,7 +339,6 @@ class Overlay(QtCore.QObject):
 
     def space_press(self, state):
         self._space = state
-        print('self._space: %s' % self._space)
 
     def wheel_scroll(self, delta):
         rect = self.rx.rect()

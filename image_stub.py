@@ -36,6 +36,8 @@ class ImageStub:
         self.pen = self._blank
         self.plus = self._blank
         self.pointer = self._blank
+        self.pointer_black = self._blank
+        self.pointer_white = self._blank
         self.pointer_off = self._blank
         self.question = self._blank
         self.refresh = self._blank
