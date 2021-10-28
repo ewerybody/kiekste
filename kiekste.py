@@ -1,7 +1,7 @@
 import os
 import json
-import logging
 import time
+import logging
 import traceback
 
 import image_stub
