@@ -9,6 +9,10 @@ IMG = image_stub.IMG
 ARGS = '-f gdigrab -draw_mouse {pointer} -framerate {fps} -offset_x {x} -offset_y {y} -video_size {w}x{h} -show_region 0 -i desktop -b:v {quality}k'
 TMP_NAME = '_kiekste_tmp'
 TMP_PATH = os.path.join(os.getenv('TEMP', ''), TMP_NAME)
+WMIC_TMP = 'wmic.exe process where {} get ProcessID,ExecutablePath'
+WMIC_PID = 'ProcessID={}'
+WMIC_NAME = 'Name="{}"'
+TOOL_NAME = 'ffmpeg.exe'
 
 
 class VideoMan(QtCore.QObject):
@@ -88,8 +92,8 @@ class _CaptureThread(QtCore.QThread):
         # how to deal with output? Do we need it?
         # subprocess needs file like objs to pipe to. These also need `.fileno`
         # so StringIO doesn't do! :/ We could open real files to pipe to:
-        self._strout_file = os.path.join(TMP_PATH, '_tmpout')
-        self._strerr_file = os.path.join(TMP_PATH, '_tmperr')
+        self._strout_file = os.path.join(TMP_PATH, '_tmpout.log')
+        self._strerr_file = os.path.join(TMP_PATH, '_tmperr.log')
 
     def run(self):
         # I'd love to use `QProcess` right away but had massive problems so far.
@@ -97,24 +101,42 @@ class _CaptureThread(QtCore.QThread):
         # process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
         import subprocess, signal
 
-        args_list = [self.path]
-        args_list.extend(ARGS.format_map(self.settings).split())
-        args_list.append(self.settings['out_path'])
+        arglist = [self.path]
+        arglist.extend(ARGS.format_map(self.settings).split())
+        arglist.append(self.settings['out_path'])
 
         tmp_stdout_fob = open(self._strout_file, 'w')
         tmp_stderr_fob = open(self._strerr_file, 'w')
 
+        nfo = subprocess.STARTUPINFO()
+        nfo.wShowWindow = subprocess.SW_HIDE
+        nfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
         process = subprocess.Popen(
-            args_list,
-            shell=True,
-            stdout=tmp_stdout_fob,
-            stderr=tmp_stderr_fob,
+            arglist, shell=True, stdout=tmp_stdout_fob, stderr=tmp_stderr_fob, startupinfo=nfo
         )
+
+        cmd = WMIC_TMP.format(WMIC_NAME.format(TOOL_NAME))
+        output = subprocess.check_output(
+            cmd, shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE
+        ).strip()
+        print('output: %s' % output)
+
+        print(f'running process {process.pid}:{process} ...')
 
         while True:
             if self.isInterruptionRequested():
-                process.send_signal(signal.CTRL_C_EVENT)
+                try:
+                    process.send_signal(signal.CTRL_C_EVENT)
+                except (OSError, SystemError) as error:
+                    print('error: %s' % error)
+
+                    cmd = WMIC_TMP.format(WMIC_NAME.format(TOOL_NAME))
+                    output = subprocess.check_output(
+                        cmd, shell=False, stdin=subprocess.PIPE, stderr=subprocess.PIPE
+                    ).strip()
+                    print('output: %s' % output)
+
                 self.msleep(100)
                 self.stopped.emit()
                 break
@@ -122,9 +144,7 @@ class _CaptureThread(QtCore.QThread):
             self.msleep(100)
 
         # sticking around as long as process would be running ...
-        cmd = subprocess.list2cmdline(
-            ['wmic.exe', 'process', 'where', f'ProcessID={process.pid}', 'get', 'ProcessID']
-        )
+        cmd = WMIC_TMP.format(WMIC_PID.format(process.pid))
         while True:
             output = subprocess.check_output(
                 cmd, shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE
@@ -186,7 +206,7 @@ def _find_ffmpeg():
     nfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
     try:
-        found = subprocess.check_output(['where', 'ffmpeg'], startupinfo=nfo)
+        found = subprocess.check_output(['where', TOOL_NAME], startupinfo=nfo)
         return found.decode().strip()
     except subprocess.CalledProcessError:
         return ''
