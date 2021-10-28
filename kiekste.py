@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import time
+import traceback
 
 import image_stub
 import video_man
@@ -601,4 +602,14 @@ def show():
 
 
 if __name__ == '__main__':
-    show()
+    try:
+        import a2output
+
+        logger = a2output.get_logwriter(NAME, reuse=False)
+        logger.set_data_path(video_man.TMP_PATH)
+        show()
+    except BaseException:
+        error_msg = traceback.format_exc().strip()
+        print(error_msg)
+        with open(os.path.join(video_man.TMP_PATH, '_startup_error.log'), 'w') as fobj:
+            fobj.write(error_msg)
