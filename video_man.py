@@ -1,5 +1,6 @@
 import os
 import time
+import traceback
 from pyside import QtCore, QtWidgets
 
 import image_stub
@@ -9,7 +10,7 @@ IMG = image_stub.IMG
 ARGS = '-f gdigrab -draw_mouse {pointer} -framerate {fps} -offset_x {x} -offset_y {y} -video_size {w}x{h} -show_region 0 -i desktop -b:v {quality}k'
 TMP_NAME = '_kiekste_tmp'
 TMP_PATH = os.path.join(os.getenv('TEMP', ''), TMP_NAME)
-WMIC_TMP = 'wmic.exe process where {} get ProcessID,ExecutablePath'
+WMIC_TMP = 'wmic.exe process where {} get Name,ProcessID'
 WMIC_PID = 'ProcessID={}'
 WMIC_NAME = 'Name="{}"'
 TOOL_NAME = 'ffmpeg.exe'
@@ -108,34 +109,42 @@ class _CaptureThread(QtCore.QThread):
         tmp_stdout_fob = open(self._strout_file, 'w')
         tmp_stderr_fob = open(self._strerr_file, 'w')
 
-        nfo = subprocess.STARTUPINFO()
-        nfo.wShowWindow = subprocess.SW_HIDE
-        nfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        nfo = _hidden_proc_nfo()
 
+        pids_b4 = get_pids(TOOL_NAME)
+        print('pids_b4: %s' % pids_b4)
         process = subprocess.Popen(
             arglist, shell=True, stdout=tmp_stdout_fob, stderr=tmp_stderr_fob, startupinfo=nfo
         )
-
-        cmd = WMIC_TMP.format(WMIC_NAME.format(TOOL_NAME))
-        output = subprocess.check_output(
-            cmd, shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE
-        ).strip()
-        print('output: %s' % output)
-
         print(f'running process {process.pid}:{process} ...')
+        new_pids = pids_b4 - get_pids(TOOL_NAME)
+        slept = 0
+        while not new_pids:
+            self.msleep(10)
+            new_pids = pids_b4 - get_pids(TOOL_NAME)
+            slept += 10
+            if slept > 1000:
+                raise RuntimeError(f'No new {TOOL_NAME} spawned!')
+
+        print('new_pids: %s' % new_pids)
+        if new_pids:
+            ffmpid = new_pids.pop()
+            print('ffmpid: %s' % ffmpid)
+        else:
+            raise RuntimeError(f'No new {TOOL_NAME} spawned!')
 
         while True:
             if self.isInterruptionRequested():
                 try:
-                    process.send_signal(signal.CTRL_C_EVENT)
+                    os.kill(ffmpid, signal.CTRL_C_EVENT)
+                    # process.send_signal(signal.CTRL_C_EVENT)
                 except (OSError, SystemError) as error:
                     print('error: %s' % error)
+                    print(traceback.format_exc().strip())
 
                     cmd = WMIC_TMP.format(WMIC_NAME.format(TOOL_NAME))
-                    output = subprocess.check_output(
-                        cmd, shell=False, stdin=subprocess.PIPE, stderr=subprocess.PIPE
-                    ).strip()
-                    print('output: %s' % output)
+                    output = subprocess.check_output(cmd, startupinfo=nfo).strip()
+                    print('output after error: %s' % output)
 
                 self.msleep(100)
                 self.stopped.emit()
@@ -146,9 +155,7 @@ class _CaptureThread(QtCore.QThread):
         # sticking around as long as process would be running ...
         cmd = WMIC_TMP.format(WMIC_PID.format(process.pid))
         while True:
-            output = subprocess.check_output(
-                cmd, shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE
-            ).strip()
+            output = subprocess.check_output(cmd, startupinfo=nfo).strip()
             if not output:
                 print('process is gone!')
                 break
@@ -157,6 +164,18 @@ class _CaptureThread(QtCore.QThread):
 
         tmp_stdout_fob.close()
         tmp_stderr_fob.close()
+
+
+
+
+def run_shell_process(name, arglist, stdout, tmp_stderr_fob):
+    import subprocess
+
+
+
+    parent_process = subprocess.Popen(
+            arglist, shell=True, stdout=tmp_stdout_fob, stderr=tmp_stderr_fob, startupinfo=_hidden_proc_nfo()
+    )
 
 
 class _FFMPegFinder(QtCore.QThread):
@@ -210,3 +229,42 @@ def _find_ffmpeg():
         return found.decode().strip()
     except subprocess.CalledProcessError:
         return ''
+
+
+def _hidden_proc_nfo():
+    import subprocess
+
+    nfo = subprocess.STARTUPINFO()
+    nfo.wShowWindow = subprocess.SW_HIDE
+    nfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    return nfo
+
+
+def get_pids(name):
+    import subprocess
+
+    nfo = _hidden_proc_nfo()
+    cmd = WMIC_TMP.format(WMIC_NAME.format(name))
+    pids = set()
+    for line in subprocess.check_output(cmd, startupinfo=nfo).strip().decode().split('\n')[1:]:
+        this_name, pid = line.rstrip().rsplit(' ', 1)
+        if this_name.rstrip() == name and pid.isdigit():
+            pids.add(int(pid))
+    return pids
+
+
+if __name__ == '__main__':
+    import subprocess
+
+    t0 = time.time()
+    name = 'explorer.exe'
+    pids = get_pids('explorer.exe')
+    print('pids: %s' % pids)
+
+    proc = subprocess.call([name], shell=False)
+
+    print('proc: %s' % proc)
+    new_pids = get_pids('cmd.exe')
+    print('new_pids: %s' % new_pids)
+    n = new_pids - pids
+    print('n: %s' % n)
