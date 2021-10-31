@@ -54,8 +54,9 @@ class ImageStub:
         try:
             obj = super().__getattribute__(name)
         except AttributeError:
-            log.error('Icons lib got request for inexistent icon:\n  "%s"!', name)
-            return self._blank
+            if not name.startswith('__'):
+                log.error('Icons lib got request for inexistent icon:\n  "%s"!', name)
+                return self._blank
 
         if not name.startswith('_'):
             if obj is self._blank:
