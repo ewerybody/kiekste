@@ -115,7 +115,7 @@ class A2Logger:
         self._data_path = data_path
         self._path = os.path.join(self._data_path, self.log_name)
         if not self._reuse:
-            with open(self._path, 'w') as file_obj:
+            with open(self._path, 'w', encoding='utf8') as file_obj:
                 file_obj.write('')
 
     @property

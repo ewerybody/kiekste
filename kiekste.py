@@ -44,7 +44,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         for seq in QtCore.Qt.Key_C, QtCore.Qt.CTRL + QtCore.Qt.Key_C:
             QShortcut(QtGui.QKeySequence(seq), self, self.clip)
 
-        for seq in (QtCore.Qt.ALT + QtCore.Qt.Key_V, ):
+        for seq in (QtCore.Qt.ALT + QtCore.Qt.Key_V,):
             QShortcut(QtGui.QKeySequence(seq), self, self.video_capture)
 
         for side in cursor_keys:

@@ -39,7 +39,8 @@ class VideoMan(QtCore.QObject):
         self.path = path
         self.video_found.emit()
 
-    def capture(self, rect: QtCore.QRectF):
+    def capture(self, rect):
+        # type: (QtCore.QRectF | QtCore.QRect) -> None
         import uuid
 
         os.makedirs(TMP_PATH, exist_ok=True)
