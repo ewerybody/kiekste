@@ -1,8 +1,10 @@
 import os
 import time
+import ctypes
 import traceback
 from pyside import QtCore, QtWidgets
 
+import common
 import image_stub
 import widgets
 
@@ -42,8 +44,8 @@ class VideoMan(QtCore.QObject):
         # type: (QtCore.QRectF | QtCore.QRect) -> None
         import uuid
 
-        os.makedirs(TMP_PATH, exist_ok=True)
-        out_file = os.path.join(TMP_PATH, f'_tmp_video{uuid.uuid4()}.mp4')
+        os.makedirs(common.TMP_PATH, exist_ok=True)
+        out_file = os.path.join(common.TMP_PATH, f'_tmp_video{uuid.uuid4()}.mp4')
         if os.path.isfile(out_file):
             os.unlink(out_file)
 
@@ -125,14 +127,17 @@ class _CaptureThread(QtCore.QThread):
             startupinfo=nfo,
         )
         print(f'running process {process.pid}:{process} ...')
+
         new_pids = pids_b4 - get_pids(TOOL_NAME)
         slept = 0
         while not new_pids:
-            self.msleep(10)
-            new_pids = pids_b4 - get_pids(TOOL_NAME)
-            slept += 10
             if slept > 1000:
                 raise RuntimeError(f'No new {TOOL_NAME} spawned!')
+            self.msleep(10)
+            pids_now = get_pids(TOOL_NAME)
+            print('pids_now: %s' % pids_now)
+            new_pids = pids_now - pids_b4
+            slept += 10
 
         print('new_pids: %s' % new_pids)
         if new_pids:
