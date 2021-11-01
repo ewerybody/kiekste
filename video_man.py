@@ -149,7 +149,14 @@ class _CaptureThread(QtCore.QThread):
         while True:
             if self.isInterruptionRequested():
                 try:
-                    os.kill(ffmpid, signal.CTRL_C_EVENT)
+                    # os.kill(ffmpid, signal.CTRL_C_EVENT)
+                    # thanks https://stackoverflow.com/a/64357453/469322
+                    kernel = ctypes.windll.kernel32
+                    kernel.FreeConsole()
+                    kernel.AttachConsole(ffmpid)
+                    kernel.SetConsoleCtrlHandler(None, 1)
+                    kernel.GenerateConsoleCtrlEvent(0, 0)
+
                     # process.send_signal(signal.CTRL_C_EVENT)
                 except (OSError, SystemError) as error:
                     print(
