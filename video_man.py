@@ -8,12 +8,11 @@ import widgets
 
 IMG = image_stub.IMG
 ARGS = '-f gdigrab -draw_mouse {pointer} -framerate {fps} -offset_x {x} -offset_y {y} -video_size {w}x{h} -show_region 0 -i desktop -b:v {quality}k'
-TMP_NAME = '_kiekste_tmp'
-TMP_PATH = os.path.join(os.getenv('TEMP', ''), TMP_NAME)
 WMIC_TMP = 'wmic.exe process where {} get Name,ProcessID'
 WMIC_PID = 'ProcessID={}'
 WMIC_NAME = 'Name="{}"'
 TOOL_NAME = 'ffmpeg.exe'
+SETTINGS = common.SETTINGS
 
 
 class VideoMan(QtCore.QObject):
@@ -48,15 +47,14 @@ class VideoMan(QtCore.QObject):
         if os.path.isfile(out_file):
             os.unlink(out_file)
 
-        settings = self.parent().settings
         capture_settings = {
             'x': rect.x(),
             'y': rect.y(),
             'w': rect.width(),
             'h': rect.height(),
-            'fps': settings.video_fps,
-            'quality': settings.video_quality,
-            'pointer': int(settings.draw_pointer),
+            'fps': SETTINGS.video_fps,
+            'quality': SETTINGS.video_quality,
+            'pointer': int(SETTINGS.draw_pointer),
             'out_path': out_file,
         }
 
@@ -94,8 +92,8 @@ class _CaptureThread(QtCore.QThread):
         # how to deal with output? Do we need it?
         # subprocess needs file like objs to pipe to. These also need `.fileno`
         # so StringIO doesn't do! :/ We could open real files to pipe to:
-        self._strout_file = os.path.join(TMP_PATH, '_tmpout.log')
-        self._strerr_file = os.path.join(TMP_PATH, '_tmperr.log')
+        self._strout_file = os.path.join(common.TMP_PATH, '_tmpout.log')
+        self._strerr_file = os.path.join(common.TMP_PATH, '_tmperr.log')
 
     def run(self):
         # I'd love to use `QProcess` right away but had massive problems so far.
@@ -114,8 +112,17 @@ class _CaptureThread(QtCore.QThread):
 
         pids_b4 = get_pids(TOOL_NAME)
         print('pids_b4: %s' % pids_b4)
+
+        devnull = open(os.devnull, 'wb')
         process = subprocess.Popen(
-            arglist, shell=True, stdout=tmp_stdout_fob, stderr=tmp_stderr_fob, startupinfo=nfo
+            arglist,
+            shell=True,
+            # stdin=subprocess.DEVNULL,
+            # stdin=subprocess.PIPE,
+            stdin=devnull,
+            stdout=tmp_stdout_fob,
+            stderr=tmp_stderr_fob,
+            startupinfo=nfo,
         )
         print(f'running process {process.pid}:{process} ...')
         new_pids = pids_b4 - get_pids(TOOL_NAME)
@@ -140,12 +147,11 @@ class _CaptureThread(QtCore.QThread):
                     os.kill(ffmpid, signal.CTRL_C_EVENT)
                     # process.send_signal(signal.CTRL_C_EVENT)
                 except (OSError, SystemError) as error:
-                    print('error: %s' % error)
+                    print(
+                        'ERROR sending signal "%s" to process %i:\n%s'
+                        % (signal.CTRL_C_EVENT, ffmpid, error)
+                    )
                     print(traceback.format_exc().strip())
-
-                    cmd = WMIC_TMP.format(WMIC_NAME.format(TOOL_NAME))
-                    output = subprocess.check_output(cmd, startupinfo=nfo).strip()
-                    print('output after error: %s' % output)
 
                 self.msleep(100)
                 self.stopped.emit()
@@ -154,29 +160,16 @@ class _CaptureThread(QtCore.QThread):
             self.msleep(100)
 
         # sticking around as long as process would be running ...
-        cmd = WMIC_TMP.format(WMIC_PID.format(process.pid))
-        while True:
-            output = subprocess.check_output(cmd, startupinfo=nfo).strip()
-            if not output:
-                print('process is gone!')
-                break
-            print('output: %s' % output)
+        ffmpids = get_pids(TOOL_NAME) - pids_b4
+        while ffmpids:
+            print('Still running: %s' % ffmpids)
             self.msleep(200)
+            ffmpids = get_pids(TOOL_NAME) - pids_b4
+        print('process is gone!')
 
+        devnull.close()
         tmp_stdout_fob.close()
         tmp_stderr_fob.close()
-
-
-
-
-def run_shell_process(name, arglist, stdout, tmp_stderr_fob):
-    import subprocess
-
-
-
-    parent_process = subprocess.Popen(
-            arglist, shell=True, stdout=tmp_stdout_fob, stderr=tmp_stderr_fob, startupinfo=_hidden_proc_nfo()
-    )
 
 
 class _FFMPegFinder(QtCore.QThread):
@@ -255,17 +248,4 @@ def get_pids(name):
 
 
 if __name__ == '__main__':
-    import subprocess
-
-    t0 = time.time()
-    name = 'explorer.exe'
-    pids = get_pids('explorer.exe')
-    print('pids: %s' % pids)
-
-    proc = subprocess.call([name], shell=False)
-
-    print('proc: %s' % proc)
-    new_pids = get_pids('cmd.exe')
-    print('new_pids: %s' % new_pids)
-    n = new_pids - pids
-    print('n: %s' % n)
+    pass

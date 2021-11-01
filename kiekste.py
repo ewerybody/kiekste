@@ -1,25 +1,24 @@
 import os
-import json
-import time
 import logging
 import traceback
 
+import common
 import image_stub
 import video_man
 import widgets
 from pyside import QtCore, QtGui, QtWidgets, QShortcut
 
-NAME = 'kiekste'
-PATH = os.path.abspath(os.path.dirname(__file__))
 LOG_LEVEL = logging.DEBUG
-log = logging.getLogger(NAME)
+log = logging.getLogger(common.NAME)
 log.setLevel(LOG_LEVEL)
 DIM_OPACITY = 110
 DIM_DURATION = 200
 DIM_INTERVAL = 20
 MODE_CAM = 'Image'
 MODE_VID = 'Video'
+
 IMG = image_stub.IMG
+SETTINGS = common.SETTINGS
 
 
 cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
@@ -28,7 +27,6 @@ cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
 class Kiekste(QtWidgets.QGraphicsView):
     def __init__(self):
         super().__init__()
-        self.settings = Settings()
         self._setup_ui()
         self._cursor_pos = None
         self.overlay = Overlay(self)
@@ -109,7 +107,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         return screen, geo
 
     def _setup_ui(self):
-        self.setWindowTitle(NAME)
+        self.setWindowTitle(common.NAME)
         self.setMouseTracking(True)
         self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
@@ -164,7 +162,10 @@ class Kiekste(QtWidgets.QGraphicsView):
         if not rect:
             return
         file_path, file_type = QtWidgets.QFileDialog.getSaveFileName(
-            self, NAME + ' Save Screenshot', self.settings.last_save_path or PATH, 'PNG (*.png)'
+            self,
+            common.NAME + ' Save Screenshot',
+            SETTINGS.last_save_path or common.PATH,
+            'PNG (*.png)',
         )
         if not file_path:
             return
@@ -172,7 +173,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.overlay.flash()
         cutout = self.pixmap.copy(rect)
         cutout.save(file_path)
-        self.settings.last_save_path = os.path.dirname(file_path)
+        SETTINGS.last_save_path = os.path.dirname(file_path)
         self._save_rect()
 
     def clip(self):
@@ -186,18 +187,18 @@ class Kiekste(QtWidgets.QGraphicsView):
 
     def _save_rect(self):
         rect_list = list(self.overlay.rect.getRect())
-        if rect_list in self.settings.last_rectangles:
-            if self.settings.last_rectangles[-1] == rect_list:
+        if rect_list in SETTINGS.last_rectangles:
+            if SETTINGS.last_rectangles[-1] == rect_list:
                 return
-            self.settings.last_rectangles.remove(rect_list)
-        self.settings.last_rectangles.append(rect_list)
-        if len(self.settings.last_rectangles) > self.settings.max_rectangles:
-            del self.settings.last_rectangles[: -self.settings.max_rectangles]
-        self.settings._save()
+            SETTINGS.last_rectangles.remove(rect_list)
+        SETTINGS.last_rectangles.append(rect_list)
+        if len(SETTINGS.last_rectangles) > SETTINGS.max_rectangles:
+            del SETTINGS.last_rectangles[: -SETTINGS.max_rectangles]
+        SETTINGS._save()
 
     def _draw_last_tangle(self):
-        if self.settings.last_rectangles:
-            rect = QtCore.QRect(*self.settings.last_rectangles[-1])
+        if SETTINGS.last_rectangles:
+            rect = QtCore.QRect(*SETTINGS.last_rectangles[-1])
             self.overlay.set_rect(rect)
             if self.toolbox is None:
                 return
@@ -212,8 +213,8 @@ class Kiekste(QtWidgets.QGraphicsView):
         print('mode: %s' % mode)
 
     def toggle_pointer(self, state):
-        self.settings.draw_pointer = state
-        self.settings._save()
+        SETTINGS.draw_pointer = state
+        SETTINGS._save()
 
     def video_capture(self):
         if not self.videoman.capturing:
@@ -280,7 +281,7 @@ class Overlay(QtCore.QObject):
 
         self._fader = _ColorFader(self)
 
-        if parent.settings.draw_pointer:
+        if SETTINGS.draw_pointer:
             pointer = QtWidgets.QGraphicsPixmapItem(IMG.pointer_black.pixmap(64))
             pointer.setPos(parent.cursor().pos())
             scene.addItem(pointer)
@@ -453,7 +454,7 @@ class ToolBox(QtWidgets.QWidget):
         widgets._TbBtn(self, IMG.down)
         widgets._TbBtn(self, IMG.save, self.save.emit)
         widgets._TbBtn(self, IMG.clipboard, self.clip.emit)
-        if parent.settings.draw_pointer:
+        if SETTINGS.draw_pointer:
             self.pointer_btn = widgets._TbBtn(self, IMG.pointer, self.toggle_pointer)
         else:
             self.pointer_btn = widgets._TbBtn(self, IMG.pointer_off, self.toggle_pointer)
@@ -469,7 +470,7 @@ class ToolBox(QtWidgets.QWidget):
         self.setWindowOpacity(0.4)
 
     def _add_spinners(self):
-        last_rects = self._parent.settings.last_rectangles
+        last_rects = SETTINGS.last_rectangles
         for i in range(4):
             spin = widgets._TbSpin(self)
             if last_rects:
@@ -527,7 +528,7 @@ class ToolBox(QtWidgets.QWidget):
             spinbox.blockSignals(False)
 
     def toggle_pointer(self):
-        if self._parent.settings.draw_pointer:
+        if SETTINGS.draw_pointer:
             self.pointer_btn.setIcon(IMG.pointer_off)
             self.pointer_toggled.emit(False)
         else:
@@ -543,57 +544,6 @@ class ToolBox(QtWidgets.QWidget):
         return super().leaveEvent(event)
 
 
-class Settings(QtCore.QObject):
-    def __init__(self):
-        super(Settings, self).__init__()
-        self.last_save_path = ''
-        self.last_rectangles = []
-        self.max_rectangles = 12
-        self.draw_pointer = True
-        self.video_fps = 10
-        self.video_quality = 5000
-
-        self._settings_file = NAME.lower() + '.json'
-        self._settings_path = os.path.join(PATH, self._settings_file)
-        self._load()
-
-    def _load(self):
-        for key, value in self._get_json().items():
-            if key not in self.__dict__:
-                log.warning(f'Key {key} not yet listed in Settings obj!1')
-            self.__dict__[key] = value
-
-    def _get_json(self):
-        import json
-
-        if os.path.isfile(self._settings_path):
-            with open(self._settings_path) as file_obj:
-                return json.load(file_obj)
-        return {}
-
-    def _save(self):
-        current = self._get_json()
-        do_write = False
-        for name, value in self.__dict__.items():
-            if name.startswith('_'):
-                continue
-            if not isinstance(value, (str, int, list, bool)):
-                continue
-            if name not in current:
-                do_write = True
-                current[name] = value
-            if current[name] == value:
-                continue
-            do_write = True
-            current[name] = value
-
-        if not do_write:
-            return
-
-        with open(self._settings_path, 'w') as file_obj:
-            json.dump(current, file_obj, indent=2, sort_keys=True)
-
-
 def show():
     app = QtWidgets.QApplication([])
     win = Kiekste()
@@ -603,13 +553,10 @@ def show():
 
 if __name__ == '__main__':
     try:
-        import a2output
-
-        logger = a2output.get_logwriter(NAME, reuse=False)
-        logger.set_data_path(video_man.TMP_PATH)
+        common.setup_logger()
         show()
     except BaseException:
         error_msg = traceback.format_exc().strip()
         print(error_msg)
-        with open(os.path.join(video_man.TMP_PATH, '_startup_error.log'), 'w') as fobj:
+        with open(os.path.join(common.TMP_PATH, '_startup_error.log'), 'w') as fobj:
             fobj.write(error_msg)
