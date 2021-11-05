@@ -306,7 +306,7 @@ class Overlay(QtCore.QObject):
         self._pos = QtCore.QPointF()
 
         self.geo = parent.geometry()
-        # have some rectangles around the center one tlrb being: top left right bottom
+        # have some rectangles around the center one. tlrb being: top left right bottom
         self.rtl = QtWidgets.QGraphicsRectItem()
         self.rt = QtWidgets.QGraphicsRectItem()
         self.rtr = QtWidgets.QGraphicsRectItem()
@@ -351,7 +351,11 @@ class Overlay(QtCore.QObject):
         self._pos.setY(pos.y())
 
         self._set_cursor()
-
+        for rect in self.rl, self.rt, self.rr, self.rb:
+            if rect.isUnderMouse() and not self._lmouse:
+                rect.setPen(QtGui.QPen(QtCore.Qt.white, 0.5))
+            else:
+                rect.setPen(QtGui.QPen(QtCore.Qt.transparent))
         if not self._lmouse:
             return
 
