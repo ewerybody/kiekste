@@ -27,8 +27,11 @@ cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
 class Kiekste(QtWidgets.QGraphicsView):
     def __init__(self):
         super().__init__()
+        self.paint_layer = PaintLayer(self)
+
         self._setup_ui()
         self._cursor_pos = None
+
         self.overlay = Overlay(self)
         self.overlay.cursor_change.connect(self.set_cursor)
 
@@ -56,6 +59,9 @@ class Kiekste(QtWidgets.QGraphicsView):
         if self.toolbox is None:
             self._build_toolbox()
             self._draw_last_tangle()
+
+        if SETTINGS.draw_pointer:
+            self.paint_layer.toggle(True)
         return super().showEvent(event)
 
     def shift_rect(self):
@@ -73,11 +79,18 @@ class Kiekste(QtWidgets.QGraphicsView):
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.buttons() & QtCore.Qt.LeftButton:
-            self.overlay.mouse_press(True)
+            if self.paint_layer.has_item_under_mouse():
+                pass
+            else:
+                self.overlay.mouse_press(True)
         return super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self.paint_layer.has_item_under_mouse():
+            self.set_cursor(QtCore.Qt.ArrowCursor)
+            return
         self.overlay.cursor_move(QtCore.QPointF(event.pos()))
+        return super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         if event.isAutoRepeat():
@@ -104,6 +117,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         self._cursor_pos = self.cursor().pos()
         self.pixmap = screen.grabWindow(0)
         self.setBackgroundBrush(QtGui.QBrush(self.pixmap))
+        self.paint_layer.set_cursor_pos(self._cursor_pos)
         return screen, geo
 
     def _setup_ui(self):
@@ -121,7 +135,8 @@ class Kiekste(QtWidgets.QGraphicsView):
 
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowFlags(
-            QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint
+            # QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint
+            QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint
         )
         self.setStyleSheet('QGraphicsView {background:transparent;}')
 
@@ -215,6 +230,7 @@ class Kiekste(QtWidgets.QGraphicsView):
     def toggle_pointer(self, state):
         SETTINGS.draw_pointer = state
         SETTINGS._save()
+        self.paint_layer.toggle(state)
 
     def video_capture(self):
         if not self.videoman.capturing:
@@ -236,6 +252,42 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.hide()
         self.set_screenshot()
         self.show()
+
+
+class PaintLayer(QtCore.QObject):
+    item_under_cursor = QtCore.Signal()
+
+    def __init__(self, parent: Kiekste):
+        super().__init__(parent)
+        self._parent = parent
+        self._cursor_pos = QtCore.QPointF()
+
+        self.items = [] # type: list[QtWidgets.QGraphicsItem]
+        self.pointer = None
+
+    def set_cursor_pos(self, cursor_pos):
+        # type: (QtCore.QPointF | QtCore.QPoint) -> None
+        self._cursor_pos = cursor_pos
+
+    def has_item_under_mouse(self):
+        for item in self.items:
+            if item.isUnderMouse():
+                return True
+        return False
+
+    def toggle(self, state):
+        scene = self._parent.scene()
+        if state and self.pointer is None and SETTINGS.draw_pointer:
+            self.pointer = QtWidgets.QGraphicsPixmapItem(IMG.pointer_black.pixmap(64))
+            self.pointer.setPos(self._cursor_pos)
+            scene.addItem(self.pointer)
+            self.pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsMovable, True)
+            # self.pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsSelectable, True)
+            # self.pointer.setZValue(1000)
+            self.items.append(self.pointer)
+
+        for item in self.items:
+            item.setVisible(state)
 
 
 class Overlay(QtCore.QObject):
@@ -270,6 +322,7 @@ class Overlay(QtCore.QObject):
         scene = parent.scene()
         for r in self.rects:
             scene.addItem(r)
+            r.setZValue(100)
             r.setBrush(self.dim_color)
             r.setPen(QtGui.QPen(QtCore.Qt.transparent, 0))
 
@@ -280,14 +333,6 @@ class Overlay(QtCore.QObject):
         self.rx.setPen(QtGui.QPen(QtCore.Qt.white, 0.5))
 
         self._fader = _ColorFader(self)
-
-        if SETTINGS.draw_pointer:
-            pointer = QtWidgets.QGraphicsPixmapItem(IMG.pointer_black.pixmap(64))
-            pointer.setPos(parent.cursor().pos())
-            scene.addItem(pointer)
-        # pointer.move
-        # pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsMovable, True)
-        # pointer.setFlag(QtWidgets.QGraphicsItem.ItemIsSelectable, True)
 
     @property
     def rect(self):
@@ -323,7 +368,7 @@ class Overlay(QtCore.QObject):
                 self._dragging.setBottomRight(pos)
                 self._set_rect(self._dragging)
 
-    def _set_cursor(self):
+    def  _set_cursor(self):
         if self.rx.isUnderMouse():
             if self._lmouse:
                 self.cursor_change.emit(QtCore.Qt.ClosedHandCursor)
