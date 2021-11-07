@@ -51,6 +51,7 @@ class ImageStub:
         self.x = self._blank
 
     def __getattribute__(self, name):
+        obj = None
         try:
             obj = super().__getattribute__(name)
         except AttributeError:
