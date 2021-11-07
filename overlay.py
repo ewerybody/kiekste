@@ -1,7 +1,8 @@
+from collections import namedtuple
 from pyside import QtCore, QtGui, QtWidgets
 
 
-DIM_OPACITY = 210
+DIM_OPACITY = 170
 DIM_DURATION = 200
 DIM_INTERVAL = 20
 RESIZE_HANDLE_WIDTH = 50
@@ -33,34 +34,34 @@ class Overlay(QtCore.QObject):
         self.rbl = QtWidgets.QGraphicsRectItem()
         self.rb = QtWidgets.QGraphicsRectItem()
         self.rbr = QtWidgets.QGraphicsRectItem()
-        self.rects = (self.rtl, self.rt, self.rtr, self.rl, self.rr, self.rbl, self.rb, self.rbr)
-        self._sides = (self.rl, self.rt, self.rr, self.rb)
-        self._corners = (self.rtl, self.rtr, self.rbl, self.rbr)
-        self.side_rsz_func = {
-            self.rl: self._rsz_l,
-            self.rt: self._rsz_t,
-            self.rr: self._rsz_r,
-            self.rb: self._rsz_b,
-            self.rtl: self._rsz_tl,
-            self.rtr: self._rsz_tr,
-            self.rbl: self._rsz_bl,
-            self.rbr: self._rsz_br,
-        }
 
-        self.dim_color = QtGui.QColor(QtCore.Qt.black)
-        self.dim_color.setAlpha(0)
         scene = parent.scene()
-        for r in self.rects:
-            scene.addItem(r)
-            r.setZValue(100)
-            r.setBrush(self.dim_color)
-            r.setPen(QtGui.QPen(QtCore.Qt.transparent, 0))
 
         # have a central rectangle
         self.rx = QtWidgets.QGraphicsRectItem()
         scene.addItem(self.rx)
         self.rx.setBrush(QtCore.Qt.transparent)
         self.rx.setPen(QtGui.QPen(QtCore.Qt.white, 0.5))
+
+        rctpl = namedtuple('rect', ['cursor', 'resize_func'])
+        self.rects = {
+            self.rl: rctpl(QtCore.Qt.SizeHorCursor, self._rsz_l),
+            self.rr: rctpl(QtCore.Qt.SizeHorCursor, self._rsz_r),
+            self.rt: rctpl(QtCore.Qt.SizeVerCursor, self._rsz_t),
+            self.rb: rctpl(QtCore.Qt.SizeVerCursor, self._rsz_b),
+            self.rtl: rctpl(QtCore.Qt.SizeFDiagCursor, self._rsz_tl),
+            self.rbr: rctpl(QtCore.Qt.SizeFDiagCursor, self._rsz_br),
+            self.rtr: rctpl(QtCore.Qt.SizeBDiagCursor, self._rsz_tr),
+            self.rbl: rctpl(QtCore.Qt.SizeBDiagCursor, self._rsz_bl),
+        }
+
+        self.dim_color = QtGui.QColor(QtCore.Qt.black)
+        self.dim_color.setAlpha(0)
+        for r in self.rects:
+            scene.addItem(r)
+            r.setZValue(100)
+            r.setBrush(self.dim_color)
+            r.setPen(QtGui.QPen(QtCore.Qt.transparent, 0))
 
         self._fader = _ColorFader(self)
         self._side_highlight_pen = QtGui.QPen(QtCore.Qt.white, 0.3)
@@ -69,25 +70,12 @@ class Overlay(QtCore.QObject):
         self.rrz = QtWidgets.QGraphicsRectItem()
         self.handle_color = QtGui.QColor(QtCore.Qt.white)
         self.handle_color.setAlpha(30)
-        self.handle_color_hover =  QtGui.QColor(QtCore.Qt.white)
+        self.handle_color_hover = QtGui.QColor(QtCore.Qt.white)
         self.handle_color_hover.setAlpha(60)
         self.rrz.setBrush(self.handle_color)
         self.rrz.setZValue(200)
         self.rrz.setPen(self._side_no_highlight_pen)
         scene.addItem(self.rrz)
-
-        self._cursors = {
-            None: QtCore.Qt.SizeAllCursor,
-            self.rx: QtCore.Qt.SizeAllCursor,
-            self.rl: QtCore.Qt.SizeHorCursor,
-            self.rr: QtCore.Qt.SizeHorCursor,
-            self.rt: QtCore.Qt.SizeVerCursor,
-            self.rb: QtCore.Qt.SizeVerCursor,
-            self.rtl: QtCore.Qt.SizeFDiagCursor,
-            self.rbr: QtCore.Qt.SizeFDiagCursor,
-            self.rtr: QtCore.Qt.SizeBDiagCursor,
-            self.rbl: QtCore.Qt.SizeBDiagCursor,
-        }
 
     @property
     def rect(self):
@@ -117,11 +105,15 @@ class Overlay(QtCore.QObject):
             self.shift_rect(diff)
         else:
             if self._resize:
-                if self._under_mouse in self.side_rsz_func:
-                    self.side_rsz_func[self._under_mouse](diff)
+                if self._under_mouse is not None and self._under_mouse in self.rects:
+                    self.rects[self._under_mouse].resize_func(diff)
             else:
                 if self._drawing is None:
                     self._drawing = QtCore.QRectF(pos, QtCore.QPointF(0, 0))
+
+                self.rrz.hide()
+                self.rrz.setRect(-100, -100, 0, 0)
+
                 if self._space:
                     self.shift_rect(diff, self._drawing)
                 else:
@@ -147,21 +139,14 @@ class Overlay(QtCore.QObject):
         self._under_mouse = under_mouse
 
         # highlight side rectangles
-        for side_rect in self._sides:
+        for side_rect in self.rects:
             if side_rect is under_mouse and not self._lmouse:
                 side_rect.setPen(self._side_highlight_pen)
             else:
                 side_rect.setPen(self._side_no_highlight_pen)
         # show resize handle
         if under_mouse in self.rects:
-            center_rect = self.rx.rect()
-            tl, br = center_rect.topLeft(), center_rect.bottomRight()
-            tl.setX(tl.x() - RESIZE_HANDLE_WIDTH)
-            tl.setY(tl.y() - RESIZE_HANDLE_WIDTH)
-            br.setX(br.x() + RESIZE_HANDLE_WIDTH)
-            br.setY(br.y() + RESIZE_HANDLE_WIDTH)
-            center_rect.setTopLeft(tl)
-            center_rect.setBottomRight(br)
+            center_rect = self.get_resized_center(RESIZE_HANDLE_WIDTH)
             handle_rect = center_rect.intersected(under_mouse.rect())
             self.rrz.setRect(handle_rect)
             self.rrz.show()
@@ -173,7 +158,7 @@ class Overlay(QtCore.QObject):
             if self._lmouse:
                 self.cursor_change.emit(QtCore.Qt.ClosedHandCursor)
             else:
-                self.cursor_change.emit(self._cursors[self.rx])
+                self.cursor_change.emit(QtCore.Qt.SizeAllCursor)
         else:
             if self.rrz.isUnderMouse():
                 self.rrz.setBrush(self.handle_color_hover)
@@ -182,7 +167,8 @@ class Overlay(QtCore.QObject):
                     self.cursor_change.emit(QtCore.Qt.ClosedHandCursor)
                 else:
                     self._resize = False
-                    self.cursor_change.emit(self._cursors[self._under_mouse])
+                    if self._under_mouse is not None:
+                        self.cursor_change.emit(self.rects[self._under_mouse].cursor)
             else:
                 self.rrz.setBrush(self.handle_color)
                 self.cursor_change.emit(QtCore.Qt.CrossCursor)
@@ -199,10 +185,13 @@ class Overlay(QtCore.QObject):
         self._space = state
 
     def wheel_scroll(self, delta):
-        rsz_func = self.side_rsz_func.get(self._under_mouse)
-        if rsz_func is None:
+        if self._under_mouse is None:
             return
-        rsz_func(delta / 10.0)
+        if self._under_mouse is self.rx:
+            self._rsz_x(delta / 10.0)
+        else:
+            resize_func = self.rects[self._under_mouse].resize_func
+            resize_func(delta / 10.0)
 
     def set_rect(self, rect):
         # type: (QtCore.QRectF | QtCore.QRect) -> QtCore.QRectF | QtCore.QRect
@@ -235,14 +224,21 @@ class Overlay(QtCore.QObject):
     def dim(self):
         self._fader.fade(self.rects, self.dim_color, DIM_OPACITY)
 
-    def undim(self):
-        self._fader.finished.connect(self.finished.emit)
-        self._fader.fade(self.rects, self.dim_color, 0)
-
     def flash(self):
         self.color = QtGui.QColor(QtCore.Qt.white)
         self.color.setAlpha(100)
         self._fader.fade([self.rx], self.color, 0)
+
+    def get_resized_center(self, value):
+        center_rect = self.rx.rect()
+        tl, br = center_rect.topLeft(), center_rect.bottomRight()
+        tl.setX(tl.x() - value)
+        tl.setY(tl.y() - value)
+        br.setX(br.x() + value)
+        br.setY(br.y() + value)
+        center_rect.setTopLeft(tl)
+        center_rect.setBottomRight(br)
+        return center_rect
 
     def _rsz_l(self, delta):
         if isinstance(delta, (QtCore.QPointF)):
@@ -327,6 +323,9 @@ class Overlay(QtCore.QObject):
         rect = self.rrz.rect()
         rect.moveTopLeft(rect.topLeft() + delta)
         self.rrz.setRect(rect)
+
+    def _rsz_x(self, delta):
+        self._set_rect(self.get_resized_center(delta))
 
 
 class _ColorFader(QtCore.QObject):
