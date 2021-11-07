@@ -12,8 +12,8 @@ class ImageStub:
     """
     Load-only-once image library object.
 
-    For convenience this already lists all usable icons and for speed it
-    just loads them up when actually needed.
+    * For convenience: this already lists all usable icons and
+    * for speed it just loads them up when actually needed.
     """
 
     def __init__(self):
@@ -73,5 +73,6 @@ class ImageStub:
                 return QtGui.QIcon(path)
             log.error('No such file: {path}')
         return QtGui.QIcon()
+
 
 IMG = ImageStub()
