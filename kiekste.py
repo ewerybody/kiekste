@@ -106,8 +106,13 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.overlay.mouse_press(False)
 
     def escape(self):
-        self.overlay.finished.connect(self.close)
-        self.overlay.undim()
+        import time
+        x = 7
+        d = 0.2
+        for i in range(1, x + 1):
+            self.setWindowOpacity(1 - ((1/x) * i))
+            time.sleep(d / x)
+        self.close()
 
     def set_screenshot(self):
         screen = QtGui.QGuiApplication.primaryScreen()
