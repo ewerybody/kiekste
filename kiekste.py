@@ -6,14 +6,12 @@ import common
 import image_stub
 import video_man
 import widgets
+import overlay
 from pyside import QtCore, QtGui, QtWidgets, QShortcut
 
 LOG_LEVEL = logging.DEBUG
 log = logging.getLogger(common.NAME)
 log.setLevel(LOG_LEVEL)
-DIM_OPACITY = 110
-DIM_DURATION = 200
-DIM_INTERVAL = 20
 MODE_CAM = 'Image'
 MODE_VID = 'Video'
 
@@ -32,7 +30,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         self._setup_ui()
         self._cursor_pos = None
 
-        self.overlay = Overlay(self)
+        self.overlay = overlay.Overlay(self)
         self.overlay.cursor_change.connect(self.set_cursor)
 
         self.toolbox = None  # type: None | ToolBox
@@ -136,7 +134,8 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowFlags(
             # QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint
-            QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint
+            QtCore.Qt.Window
+            | QtCore.Qt.FramelessWindowHint
         )
         self.setStyleSheet('QGraphicsView {background:transparent;}')
 
@@ -262,7 +261,7 @@ class PaintLayer(QtCore.QObject):
         self._parent = parent
         self._cursor_pos = QtCore.QPointF()
 
-        self.items = [] # type: list[QtWidgets.QGraphicsItem]
+        self.items = []  # type: list[QtWidgets.QGraphicsItem]
         self.pointer = None
 
     def set_cursor_pos(self, cursor_pos):
@@ -288,198 +287,6 @@ class PaintLayer(QtCore.QObject):
 
         for item in self.items:
             item.setVisible(state)
-
-
-class Overlay(QtCore.QObject):
-    finished = QtCore.Signal()
-    cursor_change = QtCore.Signal(QtCore.Qt.CursorShape)
-    rect_change = QtCore.Signal(QtCore.QRectF)
-
-    def __init__(self, parent: Kiekste):
-        super().__init__(parent)
-        self._parent = parent
-        self._lmouse = False
-        self._space = False
-        self._dragging = None
-        self._panning = False
-        self._rect_set = False
-        self._pos = QtCore.QPointF()
-
-        self.geo = parent.geometry()
-        # have some rectangles around the center one. tlrb being: top left right bottom
-        self.rtl = QtWidgets.QGraphicsRectItem()
-        self.rt = QtWidgets.QGraphicsRectItem()
-        self.rtr = QtWidgets.QGraphicsRectItem()
-        self.rl = QtWidgets.QGraphicsRectItem()
-        self.rr = QtWidgets.QGraphicsRectItem()
-        self.rbl = QtWidgets.QGraphicsRectItem()
-        self.rb = QtWidgets.QGraphicsRectItem()
-        self.rbr = QtWidgets.QGraphicsRectItem()
-        self.rects = [self.rtl, self.rt, self.rtr, self.rl, self.rr, self.rbl, self.rb, self.rbr]
-
-        self.dim_color = QtGui.QColor(QtCore.Qt.black)
-        self.dim_color.setAlpha(0)
-        scene = parent.scene()
-        for r in self.rects:
-            scene.addItem(r)
-            r.setZValue(100)
-            r.setBrush(self.dim_color)
-            r.setPen(QtGui.QPen(QtCore.Qt.transparent, 0))
-
-        # have a central rectangle
-        self.rx = QtWidgets.QGraphicsRectItem()
-        scene.addItem(self.rx)
-        self.rx.setBrush(QtCore.Qt.transparent)
-        self.rx.setPen(QtGui.QPen(QtCore.Qt.white, 0.5))
-
-        self._fader = _ColorFader(self)
-
-    @property
-    def rect(self):
-        return self.rx.rect().toAlignedRect()
-
-    def shift_rect(self, vector: QtCore.QPointF, rect: QtCore.QRectF = None):
-        if rect is None:
-            rect = self.rx.rect()
-        center = rect.center()
-        rect.moveCenter(center + vector)
-        self._set_rect(rect)
-
-    def cursor_move(self, pos: QtCore.QPointF):
-        diff = QtCore.QPointF(pos) - self._pos
-        self._pos.setX(pos.x())
-        self._pos.setY(pos.y())
-
-        self._set_cursor()
-        for rect in self.rl, self.rt, self.rr, self.rb:
-            if rect.isUnderMouse() and not self._lmouse:
-                rect.setPen(QtGui.QPen(QtCore.Qt.white, 0.5))
-            else:
-                rect.setPen(QtGui.QPen(QtCore.Qt.transparent))
-        if not self._lmouse:
-            return
-
-        if self._dragging is None and self.rx.isUnderMouse():
-            if not self._panning:
-                self._panning = True
-            self.shift_rect(diff)
-        else:
-            if self._dragging is None:
-                self._dragging = QtCore.QRectF(pos, QtCore.QPointF(0, 0))
-            if self._space:
-                self.shift_rect(diff, self._dragging)
-            else:
-                self._dragging.setBottomRight(pos)
-                self._set_rect(self._dragging)
-
-    def  _set_cursor(self):
-        if self.rx.isUnderMouse():
-            if self._lmouse:
-                self.cursor_change.emit(QtCore.Qt.ClosedHandCursor)
-            else:
-                self.cursor_change.emit(QtCore.Qt.OpenHandCursor)
-        else:
-            self.cursor_change.emit(QtCore.Qt.CrossCursor)
-
-    def mouse_press(self, state):
-        self._lmouse = state
-        self._set_cursor()
-        if not state:
-            self._panning = False
-            self._dragging = None
-
-    def space_press(self, state):
-        self._space = state
-
-    def wheel_scroll(self, delta):
-        rect = self.rx.rect()
-        for r, value_func, rect_func in (
-            (self.rl, rect.x, rect.setX),
-            (self.rt, rect.y, rect.setY),
-            (self.rr, rect.right, rect.setRight),
-            (self.rb, rect.bottom, rect.setBottom),
-        ):
-            if not r.isUnderMouse():
-                continue
-            rect_func(value_func() + delta / 10.0)
-            self._set_rect(rect)
-            return rect
-
-    def set_rect(self, rect):
-        # type: (QtCore.QRectF | QtCore.QRect) -> QtCore.QRectF | QtCore.QRect
-        """Set the inner rectangle."""
-        self._rect_set = True
-        if not rect.isValid():
-            rect = rect.normalized()
-        recw, rech = rect.width(), rect.height()
-        wr = self.geo.right() - rect.right()
-        hb = self.geo.bottom() - rect.bottom()
-
-        self.rtl.setRect(0, 0, rect.x(), rect.y())
-        self.rt.setRect(rect.x(), 0, recw, rect.y())
-        self.rtr.setRect(rect.right(), 0, wr, rect.y())
-        self.rl.setRect(0, rect.y(), rect.x(), rech)
-        self.rr.setRect(rect.right(), rect.y(), wr, rech)
-        self.rbl.setRect(0, rect.bottom(), rect.x(), hb)
-        self.rb.setRect(rect.x(), rect.bottom(), recw, hb)
-        self.rbr.setRect(rect.right(), rect.bottom(), wr, hb)
-
-        self.rx.setRect(rect)
-        return rect
-
-    def _set_rect(self, rect: QtCore.QRectF):
-        """Set the inner rectangle and signal the change."""
-        self.rect_change.emit(rect)
-        self.set_rect(rect)
-        return rect
-
-    def dim(self):
-        self._fader.fade(self.rects, self.dim_color, DIM_OPACITY)
-
-    def undim(self):
-        self._fader.finished.connect(self.finished.emit)
-        self._fader.fade(self.rects, self.dim_color, 0)
-
-    def flash(self):
-        self.color = QtGui.QColor(QtCore.Qt.white)
-        self.color.setAlpha(100)
-        self._fader.fade([self.rx], self.color, 0)
-
-
-class _ColorFader(QtCore.QObject):
-    finished = QtCore.Signal()
-
-    def __init__(self, parent):
-        super().__init__()
-        self._ticks = 0
-        self._delta = 0
-        self._timer = QtCore.QTimer(parent)
-        self._timer.timeout.connect(self._update)
-        self._timer.setInterval(DIM_INTERVAL)
-        self._color = None  # type: QtGui.QColor | None
-        self._objs = []
-
-    def fade(self, objs, color, target_opacity):
-        self._color = color
-        self._objs[:] = objs
-        self._ticks = DIM_DURATION / DIM_INTERVAL
-        self._delta = (target_opacity - color.alpha()) / self._ticks
-        self._timer.start()
-
-    def _update(self):
-        if self._color is None:
-            return
-
-        self._ticks -= 1
-        if self._ticks < 0:
-            self._timer.stop()
-            self.finished.emit()
-            return
-
-        new_value = self._color.alpha() + self._delta
-        self._color.setAlpha(max(new_value, 0))
-        for obj in self._objs:
-            obj.setBrush(self._color)
 
 
 class ToolBox(QtWidgets.QWidget):
