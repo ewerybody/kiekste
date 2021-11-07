@@ -1,10 +1,10 @@
 from pyside import QtCore, QtGui, QtWidgets
 
 
-DIM_OPACITY = 70
+DIM_OPACITY = 210
 DIM_DURATION = 200
 DIM_INTERVAL = 20
-RESIZE_HANDLE_WIDTH = 40
+RESIZE_HANDLE_WIDTH = 50
 
 
 class Overlay(QtCore.QObject):
@@ -18,6 +18,7 @@ class Overlay(QtCore.QObject):
         self._space = False
         self._drawing = None
         self._panning = False
+        self._resize = False
         self._rect_set = False
         self._pos = QtCore.QPointF()
         self._under_mouse = None
@@ -35,6 +36,16 @@ class Overlay(QtCore.QObject):
         self.rects = (self.rtl, self.rt, self.rtr, self.rl, self.rr, self.rbl, self.rb, self.rbr)
         self._sides = (self.rl, self.rt, self.rr, self.rb)
         self._corners = (self.rtl, self.rtr, self.rbl, self.rbr)
+        self.side_rsz_func = {
+            self.rl: self._rsz_l,
+            self.rt: self._rsz_t,
+            self.rr: self._rsz_r,
+            self.rb: self._rsz_b,
+            self.rtl: self._rsz_tl,
+            self.rtr: self._rsz_tr,
+            self.rbl: self._rsz_bl,
+            self.rbr: self._rsz_br,
+        }
 
         self.dim_color = QtGui.QColor(QtCore.Qt.black)
         self.dim_color.setAlpha(0)
@@ -61,6 +72,7 @@ class Overlay(QtCore.QObject):
         self.handle_color_hover =  QtGui.QColor(QtCore.Qt.white)
         self.handle_color_hover.setAlpha(60)
         self.rrz.setBrush(self.handle_color)
+        self.rrz.setZValue(200)
         self.rrz.setPen(self._side_no_highlight_pen)
         scene.addItem(self.rrz)
 
@@ -99,20 +111,27 @@ class Overlay(QtCore.QObject):
         if not self._lmouse:
             return
 
-        if self._drawing is None and self.rx.isUnderMouse():
+        if self._drawing is None and self._under_mouse is self.rx:
             if not self._panning:
                 self._panning = True
             self.shift_rect(diff)
         else:
-            if self._drawing is None:
-                self._drawing = QtCore.QRectF(pos, QtCore.QPointF(0, 0))
-            if self._space:
-                self.shift_rect(diff, self._drawing)
+            if self._resize:
+                if self._under_mouse in self.side_rsz_func:
+                    self.side_rsz_func[self._under_mouse](diff)
             else:
-                self._drawing.setBottomRight(pos)
-                self._set_rect(self._drawing)
+                if self._drawing is None:
+                    self._drawing = QtCore.QRectF(pos, QtCore.QPointF(0, 0))
+                if self._space:
+                    self.shift_rect(diff, self._drawing)
+                else:
+                    self._drawing.setBottomRight(pos)
+                    self._set_rect(self._drawing)
 
     def _check_rect_change(self):
+        if self._lmouse:
+            return
+
         if self.rx.isUnderMouse():
             under_mouse = self.rx
         else:
@@ -159,8 +178,10 @@ class Overlay(QtCore.QObject):
             if self.rrz.isUnderMouse():
                 self.rrz.setBrush(self.handle_color_hover)
                 if self._lmouse:
+                    self._resize = True
                     self.cursor_change.emit(QtCore.Qt.ClosedHandCursor)
                 else:
+                    self._resize = False
                     self.cursor_change.emit(self._cursors[self._under_mouse])
             else:
                 self.rrz.setBrush(self.handle_color)
@@ -172,23 +193,16 @@ class Overlay(QtCore.QObject):
         if not state:
             self._panning = False
             self._drawing = None
+            self._resize = False
 
     def space_press(self, state):
         self._space = state
 
     def wheel_scroll(self, delta):
-        rect = self.rx.rect()
-        for r, value_func, rect_func in (
-            (self.rl, rect.x, rect.setX),
-            (self.rt, rect.y, rect.setY),
-            (self.rr, rect.right, rect.setRight),
-            (self.rb, rect.bottom, rect.setBottom),
-        ):
-            if not r.isUnderMouse():
-                continue
-            rect_func(value_func() + delta / 10.0)
-            self._set_rect(rect)
-            return rect
+        rsz_func = self.side_rsz_func.get(self._under_mouse)
+        if rsz_func is None:
+            return
+        rsz_func(delta / 10.0)
 
     def set_rect(self, rect):
         # type: (QtCore.QRectF | QtCore.QRect) -> QtCore.QRectF | QtCore.QRect
@@ -229,6 +243,90 @@ class Overlay(QtCore.QObject):
         self.color = QtGui.QColor(QtCore.Qt.white)
         self.color.setAlpha(100)
         self._fader.fade([self.rx], self.color, 0)
+
+    def _rsz_l(self, delta):
+        if isinstance(delta, (QtCore.QPointF)):
+            x = delta.x()
+        else:
+            x = delta
+        rect = self.rx.rect()
+        rect.setX(rect.x() + x)
+        self._set_rect(rect)
+        rect = self.rrz.rect()
+        rect.moveLeft(rect.x() + x)
+        self.rrz.setRect(rect)
+
+    def _rsz_t(self, delta):
+        if isinstance(delta, (QtCore.QPointF)):
+            x = delta.y()
+        else:
+            x = delta
+        rect = self.rx.rect()
+        rect.setY(rect.y() + x)
+        self._set_rect(rect)
+        rect = self.rrz.rect()
+        rect.moveTop(rect.y() + x)
+        self.rrz.setRect(rect)
+
+    def _rsz_r(self, delta):
+        if isinstance(delta, (QtCore.QPointF)):
+            x = delta.x()
+        else:
+            x = delta
+        rect = self.rx.rect()
+        rect.setRight(rect.right() + x)
+        self._set_rect(rect)
+        rect = self.rrz.rect()
+        rect.moveLeft(rect.x() + x)
+        self.rrz.setRect(rect)
+
+    def _rsz_b(self, delta):
+        if isinstance(delta, (QtCore.QPointF)):
+            x = delta.y()
+        else:
+            x = delta
+        rect = self.rx.rect()
+        rect.setBottom(rect.bottom() + x)
+        self._set_rect(rect)
+        rect = self.rrz.rect()
+        rect.moveTop(rect.y() + x)
+        self.rrz.setRect(rect)
+
+    def _rsz_tl(self, delta):
+        rect = self.rx.rect()
+        rect.setY(rect.y() + delta.y())
+        rect.setX(rect.x() + delta.x())
+        self._set_rect(rect)
+        rect = self.rrz.rect()
+        rect.moveTopLeft(rect.topLeft() + delta)
+        self.rrz.setRect(rect)
+
+    def _rsz_tr(self, delta):
+        rect = self.rx.rect()
+        rect.setY(rect.y() + delta.y())
+        rect.setRight(rect.right() + delta.x())
+        self._set_rect(rect)
+        rect = self.rrz.rect()
+        rect.moveTopLeft(rect.topLeft() + delta)
+        self.rrz.setRect(rect)
+
+    def _rsz_bl(self, delta):
+        rect = self.rx.rect()
+        rect.setBottom(rect.bottom() + delta.y())
+        rect.setX(rect.x() + delta.x())
+        self._set_rect(rect)
+        rect = self.rrz.rect()
+        rect.moveTopLeft(rect.topLeft() + delta)
+        self.rrz.setRect(rect)
+
+    def _rsz_br(self, delta):
+        rect = self.rx.rect()
+        rect.setBottom(rect.bottom() + delta.y())
+        rect.setRight(rect.right() + delta.x())
+        self._set_rect(rect)
+        rect = self.rrz.rect()
+        rect.moveTopLeft(rect.topLeft() + delta)
+        self.rrz.setRect(rect)
 
 
 class _ColorFader(QtCore.QObject):
