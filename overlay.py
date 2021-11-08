@@ -224,6 +224,10 @@ class Overlay(QtCore.QObject):
     def dim(self):
         self._fader.fade(self.rects, self.dim_color, DIM_OPACITY)
 
+    def undim(self):
+        self._fader.finished.connect(self.finished.emit)
+        self._fader.fade(self.rects, self.dim_color, 0)
+
     def flash(self):
         self.color = QtGui.QColor(QtCore.Qt.white)
         self.color.setAlpha(100)
