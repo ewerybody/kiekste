@@ -199,9 +199,17 @@ class Kiekste(QtWidgets.QGraphicsView):
         rect = self.overlay.rect
         if not rect:
             return
-        self.overlay.flash()
         cutout = self.pixmap.copy(rect)
+        if SETTINGS.draw_pointer:
+            painter = QtGui.QPainter()
+            painter.begin(cutout)
+            trg_rect = QtCore.QRectF(0,0,rect.width(), rect.height())
+            self.scene().render(painter, trg_rect, rect)
+            painter.end()
+
+        self.overlay.flash()
         QtWidgets.QApplication.clipboard().setPixmap(cutout)
+
         self._save_rect()
 
     def _save_rect(self):
