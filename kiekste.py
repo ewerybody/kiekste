@@ -204,7 +204,9 @@ class Kiekste(QtWidgets.QGraphicsView):
             painter = QtGui.QPainter()
             painter.begin(cutout)
             trg_rect = QtCore.QRectF(0,0,rect.width(), rect.height())
+            self.overlay.hide_rects()
             self.scene().render(painter, trg_rect, rect)
+            self.overlay.show_rects()
             painter.end()
 
         self.overlay.flash()

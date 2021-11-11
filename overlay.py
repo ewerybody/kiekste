@@ -77,6 +77,16 @@ class Overlay(QtCore.QObject):
         self.rrz.setPen(self._side_no_highlight_pen)
         scene.addItem(self.rrz)
 
+    def hide_rects(self):
+        for rect in self.rects:
+            rect.hide()
+        self.rx.hide()
+
+    def show_rects(self):
+        for rect in self.rects:
+            rect.show()
+        self.rx.show()
+
     @property
     def rect(self):
         return self.rx.rect().toAlignedRect()
