@@ -138,8 +138,8 @@ class Kiekste(QtWidgets.QGraphicsView):
 
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowFlags(
-            # QtCore.Qt.Window | QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint
             QtCore.Qt.Window
+            | QtCore.Qt.WindowStaysOnTopHint
             | QtCore.Qt.FramelessWindowHint
         )
         self.setStyleSheet('QGraphicsView {background:transparent;}')
@@ -247,6 +247,9 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.paint_layer.toggle(state)
 
     def video_capture(self):
+        if not MODE_VID in self.toolbox._modes:
+            return
+
         if not self.videoman.capturing:
             self._save_rect()
             self.overlay.undim()
