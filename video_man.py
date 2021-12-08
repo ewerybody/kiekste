@@ -35,6 +35,9 @@ class VideoMan(QtCore.QObject):
         thread.start()
 
     def _ffmpeg_found(self, path: str):
+        if '\n' in path:
+            path = path.split('\n')[0].strip()
+
         if not os.path.isfile(path):
             return
         self.path = path
