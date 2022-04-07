@@ -7,7 +7,7 @@ import image_stub
 import video_man
 import widgets
 import overlay
-from pyside import QtCore, QtGui, QtWidgets, QShortcut
+from pyside import QtCore, QtGui, QtWidgets
 
 LOG_LEVEL = logging.DEBUG
 log = logging.getLogger(common.NAME)
@@ -37,17 +37,17 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.videoman = video_man.VideoMan(self)
         self.videoman.video_found.connect(self._found_video_tool)
 
-        QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
+        QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Escape), self, self.escape)
         for seq in QtCore.Qt.Key_S, QtCore.Qt.CTRL + QtCore.Qt.Key_S:
-            QShortcut(QtGui.QKeySequence(seq), self, self.save_shot)
+            QtGui.QShortcut(QtGui.QKeySequence(seq), self, self.save_shot)
         for seq in QtCore.Qt.Key_C, QtCore.Qt.CTRL + QtCore.Qt.Key_C:
-            QShortcut(QtGui.QKeySequence(seq), self, self.clip)
+            QtGui.QShortcut(QtGui.QKeySequence(seq), self, self.clip)
 
         for seq in (QtCore.Qt.ALT + QtCore.Qt.Key_V,):
-            QShortcut(QtGui.QKeySequence(seq), self, self.video_capture)
+            QtGui.QShortcut(QtGui.QKeySequence(seq), self, self.video_capture)
 
         for side in cursor_keys:
-            QShortcut(QtGui.QKeySequence.fromString(side), self, self.shift_rect)
+            QtGui.QShortcut(QtGui.QKeySequence.fromString(side), self, self.shift_rect)
 
         self.set_cursor(QtCore.Qt.CrossCursor)
         self.show()
@@ -63,8 +63,8 @@ class Kiekste(QtWidgets.QGraphicsView):
         return super().showEvent(event)
 
     def shift_rect(self):
-        short_cut = self.sender()  # type: QShortcut
-        if not isinstance(short_cut, QShortcut):
+        short_cut = self.sender()  # type: QtGui.QShortcut
+        if not isinstance(short_cut, QtGui.QShortcut):
             return
         trigger_key = short_cut.key().toString()
         shift = cursor_keys.get(trigger_key)
@@ -72,7 +72,11 @@ class Kiekste(QtWidgets.QGraphicsView):
             self.overlay.shift_rect(*shift)
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
-        self.overlay.wheel_scroll(event.delta())
+        try:
+            delta = event.angleDelta().y()
+        except AttributeError:
+            delta = event.delta()
+        self.overlay.wheel_scroll(delta)
         return super().wheelEvent(event)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
@@ -139,7 +143,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowFlags(
             QtCore.Qt.Window
-            | QtCore.Qt.WindowStaysOnTopHint
+            # | QtCore.Qt.WindowStaysOnTopHint
             | QtCore.Qt.FramelessWindowHint
         )
         self.setStyleSheet('QGraphicsView {background:transparent;}')
