@@ -1,5 +1,5 @@
-import json
 import os
+import json
 import logging
 
 NAME = 'kiekste'
@@ -8,7 +8,20 @@ TMP_PATH = os.path.join(os.getenv('TEMP', ''), TMP_NAME)
 PATH = os.path.abspath(os.path.dirname(__file__))
 LOG_LEVEL = logging.DEBUG
 ENCODING = 'utf8'
-log = logging.getLogger(__name__)
+# logging.basicConfig()
+LOG_FMT = '%(levelname)s: [%(name)s] %(message)s'
+
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(logging.Formatter(LOG_FMT, None))
+logging.root.handlers = [_stream_handler]
+
+
+def get_logger(name):
+    new_logger = logging.getLogger(name)
+    new_logger.setLevel(LOG_LEVEL)
+    return new_logger
+
+log = get_logger(f'{NAME}.common')
 
 
 class _Settings:

@@ -9,17 +9,13 @@ import widgets
 import overlay
 from pyside import QtCore, QtGui, QtWidgets
 
-LOG_LEVEL = logging.DEBUG
-log = logging.getLogger(common.NAME)
-log.setLevel(LOG_LEVEL)
+log = common.get_logger(common.NAME)
 MODE_CAM = 'Image'
 MODE_VID = 'Video'
 
 IMG = image_stub.IMG
 SETTINGS = common.SETTINGS
-
-
-cursor_keys = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
+CURSOR_KEYS = {'Left': (-1, 0), 'Up': (0, -1), 'Right': (1, 0), 'Down': (0, 1)}
 
 
 class Kiekste(QtWidgets.QGraphicsView):
@@ -46,7 +42,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         for seq in (QtCore.Qt.ALT + QtCore.Qt.Key_V,):
             QtGui.QShortcut(QtGui.QKeySequence(seq), self, self.video_capture)
 
-        for side in cursor_keys:
+        for side in CURSOR_KEYS:
             QtGui.QShortcut(QtGui.QKeySequence.fromString(side), self, self.shift_rect)
 
         self.set_cursor(QtCore.Qt.CrossCursor)
@@ -63,11 +59,11 @@ class Kiekste(QtWidgets.QGraphicsView):
         return super().showEvent(event)
 
     def shift_rect(self):
-        short_cut = self.sender()  # type: QtGui.QShortcut
+        short_cut = self.sender()
         if not isinstance(short_cut, QtGui.QShortcut):
             return
         trigger_key = short_cut.key().toString()
-        shift = cursor_keys.get(trigger_key)
+        shift = CURSOR_KEYS.get(trigger_key)
         if shift:
             self.overlay.shift_rect(*shift)
 
@@ -134,7 +130,9 @@ class Kiekste(QtWidgets.QGraphicsView):
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
 
         screen, geo = self.set_screenshot()
-        scene = QtWidgets.QGraphicsScene(0, 0, geo.width(), geo.height())
+        # w, h = geo.width(), geo.height()
+        w, h = self.pixmap.width(), self.pixmap.height()
+        scene = QtWidgets.QGraphicsScene(0, 0, w, h)
         self.setScene(scene)
         self.setViewportUpdateMode(QtWidgets.QGraphicsView.BoundingRectViewportUpdate)
         self.setCacheMode(QtWidgets.QGraphicsView.CacheBackground)
@@ -150,14 +148,15 @@ class Kiekste(QtWidgets.QGraphicsView):
 
         # Because there is a white border that I can't get rid of,
         # lets shift and size the window a little:
-        geo_hack = QtCore.QRect(-1, -1, geo.width() + 2, geo.height() + 3)
+        geo_hack = QtCore.QRect(-1, -1, w + 2, h + 3)
+        # geo_hack = QtCore.QRect(0,0,w,h)
         self.setGeometry(geo_hack)
 
-        # Now because of this we need to adjust the scaling to compensate for that.
+        # Now we need to adjust the scaling to compensate for that.
         # on top of the scaling we do for HighDPI scaled desktop vs pixels grabbed.
-        width_factor = geo.width() / geo_hack.width() + 0.001
-        pix_rect = self.pixmap.rect()
-        self.scale(geo.width() * width_factor / pix_rect.width(), geo.height() / pix_rect.height())
+        self.width_factor = geo.width() / geo_hack.width() + 0.001
+        # pix_rect = self.pixmap.rect()
+        # self.scale(geo.width() * width_factor / pix_rect.width(), geo.height() / pix_rect.height())
 
         self.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
         return screen
@@ -231,6 +230,7 @@ class Kiekste(QtWidgets.QGraphicsView):
 
     def _draw_last_tangle(self):
         if SETTINGS.last_rectangles:
+            log.debug(f'last rectangle: {SETTINGS.last_rectangles[-1]}')
             rect = QtCore.QRect(*SETTINGS.last_rectangles[-1])
             self.overlay.set_rect(rect)
             if self.toolbox is None:
@@ -426,7 +426,7 @@ def show():
     app = QtWidgets.QApplication([])
     win = Kiekste()
     win.show()
-    app.exec_()
+    app.exec()
 
 
 if __name__ == '__main__':
