@@ -87,7 +87,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         if self.paint_layer.has_item_under_mouse():
             self.set_cursor(QtCore.Qt.ArrowCursor)
             return
-        self.overlay.cursor_move(QtCore.QPointF(event.pos()))
+        self.overlay.cursor_move(event.position())
         return super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
@@ -154,7 +154,7 @@ class Kiekste(QtWidgets.QGraphicsView):
 
         # Now we need to adjust the scaling to compensate for that.
         # on top of the scaling we do for HighDPI scaled desktop vs pixels grabbed.
-        self.width_factor = geo.width() / geo_hack.width() + 0.001
+        self.scale_factor = geo.width() / w
         # pix_rect = self.pixmap.rect()
         # self.scale(geo.width() * width_factor / pix_rect.width(), geo.height() / pix_rect.height())
 
@@ -193,7 +193,7 @@ class Kiekste(QtWidgets.QGraphicsView):
             return
 
         self.overlay.flash()
-        cutout = self.pixmap.copy(rect)
+        cutout = self.pixmap.copy(QtCore.QRect(rect.x(), rect.y(), rect.width(), rect.height()))
         cutout.save(file_path)
         SETTINGS.last_save_path = os.path.dirname(file_path)
         self._save_rect()
@@ -202,7 +202,7 @@ class Kiekste(QtWidgets.QGraphicsView):
         rect = self.overlay.rect
         if not rect:
             return
-        cutout = self.pixmap.copy(rect)
+        cutout = self.pixmap.copy(QtCore.QRect(rect.x(), rect.y(), rect.width(), rect.height()))
         if SETTINGS.draw_pointer:
             painter = QtGui.QPainter()
             painter.begin(cutout)

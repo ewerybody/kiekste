@@ -25,6 +25,7 @@ class Overlay(QtCore.QObject):
         self._under_mouse = None
 
         self.geo = parent.geometry()
+        self.scale_factor = parent.scale_factor
         # have some rectangles around the center one. tlrb being: top left right bottom
         self.rtl = QtWidgets.QGraphicsRectItem()
         self.rt = QtWidgets.QGraphicsRectItem()
@@ -89,7 +90,8 @@ class Overlay(QtCore.QObject):
 
     @property
     def rect(self):
-        return self.rx.rect().toAlignedRect()
+        # return self._output_rect(self.rx.rect().toAlignedRect())
+        return self._output_rect(self.rx.rect())
 
     def shift_rect(self, vector: QtCore.QPointF, rect: QtCore.QRectF = None):
         if rect is None:
@@ -100,6 +102,9 @@ class Overlay(QtCore.QObject):
 
     def cursor_move(self, pos: QtCore.QPointF):
         diff = QtCore.QPointF(pos) - self._pos
+        x = pos.x()
+        y = pos.y()
+        print('xy: %s,%s' % (x, y))
         self._pos.setX(pos.x())
         self._pos.setY(pos.y())
 
@@ -227,9 +232,17 @@ class Overlay(QtCore.QObject):
 
     def _set_rect(self, rect: QtCore.QRectF):
         """Set the inner rectangle and signal the change."""
-        self.rect_change.emit(rect)
+        self.rect_change.emit(self._output_rect(rect))
         self.set_rect(rect)
         return rect
+
+    def _output_rect(self, rect: QtCore.QRectF) -> QtCore.QRectF:
+        return QtCore.QRectF(
+            rect.x() / self.scale_factor,
+            rect.y() / self.scale_factor,
+            rect.width() / self.scale_factor,
+            rect.height() / self.scale_factor,
+        )
 
     def dim(self):
         self._fader.fade(self.rects, self.dim_color, DIM_OPACITY)
