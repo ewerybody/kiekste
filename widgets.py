@@ -21,7 +21,7 @@ class _TbSpin(QtWidgets.QSpinBox):
         self.setMinimum(0)
         self.setMaximum(6384)
         self.setValue(0)
-        self.setButtonSymbols(self.NoButtons)
+        self.setButtonSymbols(self.ButtonSymbols.NoButtons)
         self.setStyleSheet(
             'QSpinBox {'
             'border: 0; border-radius: 5px; font-size: 24px;'
@@ -31,9 +31,9 @@ class _TbSpin(QtWidgets.QSpinBox):
         )
 
     def leaveEvent(self, event: QtCore.QEvent):
-        self.setButtonSymbols(self.NoButtons)
+        self.setButtonSymbols(self.ButtonSymbols.NoButtons)
         return super().leaveEvent(event)
 
     def enterEvent(self, event: QtCore.QEvent):
-        self.setButtonSymbols(self.UpDownArrows)
+        self.setButtonSymbols(self.ButtonSymbols.UpDownArrows)
         return super().leaveEvent(event)
