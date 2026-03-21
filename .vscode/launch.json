@@ -5,11 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Start 'Kiekste'",
             "type": "python",
+            "python": "${command:python.interpreterPath}",
             "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal"
+            "program": "kiekste.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
     ]
 }
